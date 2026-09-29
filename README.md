@@ -319,15 +319,20 @@ names, don't collide with them.
   with a warning.
 - A hot build is bigger and slower to build: `-D scriptable` and `-dce no` keep every
   class the executable has, whole, for the modules to call.
-- The reloaded code runs in cppia, which is slower than hxcpp's native code: through its
-  JIT, or interpreted in a `-debug` build. Hot statics are read and written through their
-  storage (as `Dynamic`), and hot functions are called through a variable. The debug and
-  release builds have none of this.
+- The reloaded code runs in cppia, which is slower than hxcpp's native code: measured at
+  5–13× slower through its JIT, and up to 56× slower interpreted in a `-debug` build. Hot
+  statics are read and written through their storage (as `Dynamic`), and hot functions
+  are called through a variable. The debug and release builds have none of this.
 - New code that uses a class the executable was built without, and which has native parts
-  (an extern), fails to load. Restart to build it in.
+  (an extern), fails to load, with "Bad link". Restart to build it in.
+- A program started again runs the code it was built with, not what's in the sources now,
+  until the next change reloads. Rebuild after editing a stopped program.
 - Old modules aren't freed.
 - A change to the main class, or to a `@:hot` function's signature, requires a restart.
 - A class in the reloaded code with its own `@:native` can't be reloaded.
+
+[docs/comparison.md](docs/comparison.md) compares hotreload-hx with hotreload-nim: reload
+times, the speed of reloaded code, and what each can and can't do.
 
 ## The repo
 
@@ -341,6 +346,7 @@ src/hotreload/
   Slot.hx, Slots.hx      hot statics' storage, which the executable keeps
   Hooks.hx               the reload hooks, and the executable's @:hot functions
   Migrate.hx             carrying the hot statics' objects over to the new classes
+docs/comparison.md       hotreload-nim and hotreload-hx, measured side by side
 tests/                   `haxe tests/run.hxml`: a smoke test that builds tests/reload/
                          hot, runs it and edits it while it runs
 examples/hello/          a console application: src/Main.hx, its main class, and
