@@ -1,0 +1,12 @@
+{
+	"name": "hotreload-hx",
+	"url": "https://github.com/whirlinggizmo/hotreload-hx",
+	"license": "MIT",
+	"tags": ["cpp", "cppia", "hotreload", "gamedev"],
+	"description": "Hot reload for Haxe applications: a running program's code is rebuilt when you save a change, and swapped in without losing its state.",
+	"version": "0.1.0",
+	"classPath": "src/",
+	"releasenote": "First release: hxcpp, through cppia.",
+	"contributors": [],
+	"dependencies": {}
+}

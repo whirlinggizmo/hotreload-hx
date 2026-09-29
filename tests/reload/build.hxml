@@ -1,0 +1,7 @@
+# the smoke test's program, hot (RunTests builds and runs it)
+-cp src
+-lib hotreload-hx
+--main Main
+-D hotreload
+-debug
+--cpp out/hot

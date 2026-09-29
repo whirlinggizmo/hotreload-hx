@@ -1,0 +1,29 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Hot (hxcpp)",
+			"type": "hxcpp",
+			"request": "launch",
+			"internalConsoleOptions": "openOnSessionStart",
+			"preLaunchTask": "build hot",
+			"program": "${workspaceFolder}/out/hot/Main-debug",
+			"windows": {
+				"program": "${workspaceFolder}/out/hot/Main-debug.exe"
+			},
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"name": "Debug (hxcpp)",
+			"type": "hxcpp",
+			"request": "launch",
+			"internalConsoleOptions": "openOnSessionStart",
+			"preLaunchTask": "build debug",
+			"program": "${workspaceFolder}/out/debug/Main-debug",
+			"windows": {
+				"program": "${workspaceFolder}/out/debug/Main-debug.exe"
+			},
+			"cwd": "${workspaceFolder}"
+		}
+	]
+}

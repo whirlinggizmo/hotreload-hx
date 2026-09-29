@@ -1,0 +1,8 @@
+{
+	// what the Haxe extension completes and checks with (and what "haxe: active
+	// configuration" builds): the debug build, since a hot build's config only matters
+	// when it runs
+	"haxe.configurations": [
+		["common.hxml", "-debug", "--cpp", "out/debug"]
+	]
+}

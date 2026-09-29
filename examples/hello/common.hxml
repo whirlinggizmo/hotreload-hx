@@ -1,0 +1,4 @@
+# what every build of hello has: hotreload (haxelib dev hotreload-hx <this repo>, or haxelib git)
+-cp src
+-lib hotreload-hx
+--main Main

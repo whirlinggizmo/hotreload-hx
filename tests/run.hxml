@@ -1,0 +1,4 @@
+# the smoke test: haxe tests/run.hxml, from the repo's directory
+-cp tests
+--main RunTests
+--interp
