@@ -17,6 +17,7 @@ executable's cppia host.
 - **hxcpp**, and what it needs to build (gcc or clang on Linux and macOS, MSVC or MinGW on
   Windows)
 - `haxe` on the `PATH` while the application runs: it builds each reload
+- To debug the reloaded code: forks of hxcpp and hxcpp-debugger (see Debugging)
 
 Note that only Linux is tested so far.
 
@@ -294,6 +295,25 @@ Note that a compilation server notices a changed file by its time, in whole seco
 its own it would miss a second save in the same second as the last build's. The reloader
 tells it which files changed since the last build started.
 
+### Debugging
+
+Breakpoints in the reloaded code, which runs in cppia, need forks of hxcpp and of
+hxcpp-debugger, the VS Code extension: their fixes for debugging cppia aren't upstream
+yet. With them, breakpoints hit in the reloaded code and stay on their lines after a
+reload.
+
+- [robknopf/hxcpp](https://github.com/robknopf/hxcpp): `haxelib dev hxcpp <its clone>`
+- [robknopf/hxcpp-debugger](https://github.com/robknopf/hxcpp-debugger): the extension,
+  installed from the `.vsix` in its repo (`code --install-extension <the .vsix>`), and the
+  debug server the program links, `haxelib dev hxcpp-debug-server <its clone>/hxcpp-debug-server`
+
+A hot build to debug has `-debug` and `-lib hxcpp-debug-server`, as the examples' `build
+hot` tasks and `Hot (hxcpp)` launch configurations do. In a `-debug` build the modules run
+interpreted, not through cppia's JIT, since breakpoints only fire there. As such it's the
+slowest way to run reloaded code. The extension talks to the program on port 6972, so a
+program left running from an earlier session can make a new debugging session fail to
+start; the extension says so.
+
 ## What happens on a reload
 
 Everything happens in `reloader.update()`. A few times a second, `update()` checks the
@@ -349,6 +369,7 @@ src/hotreload/
 docs/comparison.md       hotreload-nim and hotreload-hx, measured side by side
 tests/                   `haxe tests/run.hxml`: a smoke test that builds tests/reload/
                          hot, runs it and edits it while it runs
+tests/matrix/            the capability matrix behind docs/comparison.md
 examples/hello/          a console application: src/Main.hx, its main class, and
                          src/Hello.hx, which is reloaded
 examples/simple/         wgrender-hx's simple example, hot reloaded: a window, a scene,

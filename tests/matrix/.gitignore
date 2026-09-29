@@ -1,0 +1,8 @@
+# what run.py writes: the scenario's sources (from v1/ and v2/), the builds, and the logs
+src/Game.hx
+src/game/
+out/
+perf/out/
+logs/
+__pycache__/
+*.tmp

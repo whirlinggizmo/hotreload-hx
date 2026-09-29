@@ -22,9 +22,9 @@ run fast or call C. Pick by what you're reloading, not by language.
 
 ## How it was measured
 
-Every result here comes from running the libraries, not from their READMEs. Each ran in a
-git worktree in a scratch directory. Edits were saved as editors save them: a temporary
-file, then a rename.
+Every result here comes from running the libraries, not from their READMEs. Edits were
+saved as editors save them: a temporary file, then a rename. The test programs are in
+`tests/matrix/` in each repo, with how to run them.
 
 | Program | What it measured |
 | --- | --- |

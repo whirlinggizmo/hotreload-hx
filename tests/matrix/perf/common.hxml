@@ -1,0 +1,4 @@
+-cp src
+-lib hotreload-hx
+--main Main
+-D hotreload
