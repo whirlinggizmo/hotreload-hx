@@ -1,0 +1,4 @@
+# build and run a release build
+common.hxml
+--cpp out/release
+--cmd out/release/Main

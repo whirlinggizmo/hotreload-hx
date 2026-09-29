@@ -1,0 +1,9 @@
+# what every build of simple has: hotreload (haxelib dev hotreload-hx <this repo>, or
+# haxelib git), and wgrender-hx (haxelib dev wgrender-hx <its clone>), which compiles
+# wgrender in from its sources
+-cp src
+-lib hotreload-hx
+-lib wgrender-hx
+--main Main
+# 64-bit on every OS: hxcpp builds 32-bit on Windows unless told otherwise
+-D HXCPP_M64

@@ -54,6 +54,7 @@ class Builder {
 		libraryDirs = [];
 		libraryMain = null;
 		configured = false;
+		std = null;
 		if (Context.defined("hotreload_library")) {
 			mode = Library;
 			libraryDirs = Context.definedValue("hotreload_dirs").split("|");
@@ -253,6 +254,12 @@ class Builder {
 			}
 		}
 
+		if (mode == Host && !cls.isExtern) {
+			for (field in result)
+				if (externNative(field))
+					changed = true;
+		}
+
 		if (mode == Library && !cls.isInterface && !cls.isExtern && fileOf(cls.pos) != null) {
 			var file = fileOf(cls.pos);
 			if (inside(file, libraryDirs) && className != libraryMain) {
@@ -261,6 +268,10 @@ class Builder {
 					extra.push(init);
 					changed = true;
 				}
+			} else if (!inside(file, libraryDirs) && !file.startsWith(stdDir())) {
+				for (field in result)
+					if (callHost(cls, field))
+						changed = true;
 			}
 		}
 
@@ -443,6 +454,119 @@ class Builder {
 		}
 		visit(e);
 		return found;
+	}
+
+	/**
+		`-D scriptable` gives every function of the executable a wrapper cppia calls it
+		through, with its arguments and result as Dynamic, which a C pointer, struct, enum
+		or function pointer can't be: the C++ doesn't compile (and Haxe ignores
+		`@:unreflective` on a static for this). Such a function is a native binding's
+		plumbing, which cppia could never call: an inline one is made `extern inline`,
+		which has no compiled body, and so no wrapper. A non-inline one has to be in a
+		private class, which gets no wrappers; that's the library's to do
+	**/
+	static function externNative(field:Field):Bool {
+		if (!field.access.contains(AInline) || field.access.contains(AExtern) || field.access.contains(AMacro))
+			return false;
+		var f = switch (field.kind) {
+			case FFun(f): f;
+			default: return false;
+		}
+		if (!hasNativeType(f, field.pos))
+			return false;
+		field.access.push(AExtern);
+		return true;
+	}
+
+	/** whether a function's parameters or result have a type that can't be Dynamic, as far as they're written out **/
+	static function hasNativeType(f:Function, pos:Position):Bool {
+		var types = f.args.map(a -> a.type);
+		types.push(f.ret);
+		for (t in types) {
+			if (t == null)
+				continue;
+			var type = try Context.resolveType(t, pos) catch (_) null;
+			if (type != null && isNative(type))
+				return true;
+		}
+		return false;
+	}
+
+	/** whether a type can't be Dynamic: a C pointer, struct, enum or function pointer **/
+	static function isNative(t:Type):Bool {
+		var followed = Context.follow(t);
+		return switch (followed) {
+			case TInst(_.get() => c, _): c.isExtern && (c.meta.has(":unreflective") || c.meta.has(":structAccess"));
+			case TAbstract(_.get() => a, _):
+				if (a.meta.has(":callable"))
+					true;
+				else if (a.meta.has(":coreType"))
+					false;
+				else
+					switch (Context.followWithAbstracts(followed, true)) {
+						case TAbstract(_.get() => b, _) if (b.name == a.name && b.pack.join(".") == a.pack.join(".")): false;
+						case underlying: isNative(underlying);
+					}
+			default: false;
+		}
+	}
+
+	/**
+		In a reload's build, a library's inline function is made a call to the executable's
+		compiled copy instead, since its body, inlined into the module, may be what cppia
+		can't run: a call to an extern, or C++ (a native binding's wrappers are all of
+		that). What has to stay inline stays: an `extern inline` function (an overload,
+		say; it has no compiled copy, so its body is inlined, and if cppia can't run it,
+		the reload fails to load), a native one (the same), an abstract's constructor (an
+		`inline var` may be made with it), and a function that assigns the abstract's `this`
+	**/
+	static function callHost(cls:ClassType, field:Field):Bool {
+		if (!field.access.contains(AInline) || field.access.contains(AExtern) || field.access.contains(AMacro))
+			return false;
+		var f = switch (field.kind) {
+			case FFun(f): f;
+			default: return false;
+		}
+		if (f.expr == null)
+			return false;
+		var isAbstract = cls.kind.match(KAbstractImpl(_));
+		if (isAbstract && (field.name == "new" || assignsThis(f.expr)))
+			return false;
+		// a native one has no compiled copy in the executable (see externNative), and
+		// its body can't be compiled here either
+		if (hasNativeType(f, field.pos)) {
+			field.access.push(AExtern);
+			return true;
+		}
+		field.access.remove(AInline);
+		return true;
+	}
+
+	static function assignsThis(e:Expr):Bool {
+		var found = false;
+		function walk(e:Expr) {
+			if (found || e == null)
+				return;
+			switch (e.expr) {
+				case EBinop(OpAssign | OpAssignOp(_), {expr: EConst(CIdent("this"))}, _):
+					found = true;
+				case EUnop(OpIncrement | OpDecrement, _, {expr: EConst(CIdent("this"))}):
+					found = true;
+				default:
+					haxe.macro.ExprTools.iter(e, walk);
+			}
+		}
+		walk(e);
+		return found;
+	}
+
+	static var std:String;
+
+	/** the standard library's directory, whose inline functions are left alone **/
+	static function stdDir():String {
+		if (std == null)
+			std = Path.addTrailingSlash(Path.directory(Path.normalize(FileSystem.absolutePath(Context.resolvePath("Std.hx")))));
+		return std;
 	}
 
 	static function isMain(cls:ClassType):Bool {

@@ -1,0 +1,9 @@
+# build and run a debug build, no hot reload
+common.hxml
+-debug
+
+# if we want debugging with vscode
+-lib hxcpp-debug-server
+
+--cpp out/debug
+--cmd out/debug/Main-debug

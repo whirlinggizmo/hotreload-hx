@@ -107,6 +107,13 @@ Howdy, world! (ticks: 16, since the last reload: 1)
 `ticks` is a hot static, so it keeps counting through the reload. `sinceReload` is a
 plain static, so it starts over.
 
+`examples/simple` is the same thing with a window: [wgrender-hx](https://github.com/whirlinggizmo/wgrender-hx)'s
+simple example (an animated model, a sprite, music, text), with its scene, timers and
+loaded assets kept across reloads. It needs wgrender-hx installed and a link to its
+assets, which `src/Main.hx` explains; then `haxe hot.hxml`, and edit `src/Simple.hx`.
+Each example has a debug and a release build too, and `.vscode/` tasks and launch
+configurations for them.
+
 ## Usage
 
 ### State
@@ -235,6 +242,39 @@ The modules go to a `hotreload/` directory in the hot build's `--cpp` directory
 (`out/hot/hotreload/` above), with the list of the executable's classes the modules are
 compiled against.
 
+### Native bindings
+
+cppia can't run an extern call or `__cpp__`, and a binding of a C library is made of
+those. So **a reload's build doesn't inline library code**: every `inline` function
+outside the reloaded directories (and outside the standard library) is compiled as a
+call to the executable's copy of it, and the C++ runs there. hotreload does this
+itself, in every module build, with nothing to turn on; what stays inline is what has
+to (an `extern inline` function, an abstract's constructor, a function that assigns an
+abstract's `this`). A library needs two things for it to work:
+
+- **C types only in private classes.** `-D scriptable` makes a cppia wrapper for every
+  static of a public class, including its private ones, and a wrapper for a C pointer,
+  struct, enum or function pointer doesn't compile. hotreload makes such an `inline`
+  function `extern inline`, which has no wrapper (cppia could never have called it);
+  a non-inline one (a C callback, say) has to be in a private class, which gets none.
+- **Compiled copies of what the reloaded code calls.** An `extern inline` function has
+  none, so its body is inlined into the module, and if that's C, the reload fails to
+  load with `Unknown static call to ...`. Haxe requires `overload` functions to be
+  `extern inline`, so an overload can't make the C call itself: it calls a plain
+  `inline` function that does (which the native build inlines all the same):
+
+  ```haxe
+  public static overload extern inline function setPosition(m:Model, v:Vec3):Bool
+  	return setPosition3(m, v.x, v.y, v.z);
+  public static overload extern inline function setPosition(m:Model, x:Float, y:Float, z:Float):Bool
+  	return setPosition3(m, x, y, z);
+  static inline function setPosition3(m:Model, x:Float, y:Float, z:Float):Bool
+  	return Raw.wgr_model_set_position(m, x, y, z);
+  ```
+
+`examples/simple` is wgrender-hx, which is all inline wrappers over externs, reloading
+at full speed through this.
+
 ### The compilation server
 
 The reloader starts a Haxe compilation server (`haxe --wait`, on a free local port) when
@@ -305,6 +345,8 @@ tests/                   `haxe tests/run.hxml`: a smoke test that builds tests/r
                          hot, runs it and edits it while it runs
 examples/hello/          a console application: src/Main.hx, its main class, and
                          src/Hello.hx, which is reloaded
+examples/simple/         wgrender-hx's simple example, hot reloaded: a window, a scene,
+                         assets, a native binding
 ```
 
 ## License

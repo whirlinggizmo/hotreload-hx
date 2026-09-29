@@ -1,0 +1,10 @@
+# build and run with hot reload: edit src/Simple.hx while it runs
+common.hxml
+-D hotreload
+-debug
+
+# if we want debugging with vscode
+-lib hxcpp-debug-server
+
+--cpp out/hot
+--cmd out/hot/Main-debug
