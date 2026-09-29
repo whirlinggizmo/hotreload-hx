@@ -1,4 +1,5 @@
-# build and run a release build
+# build a release build, no hot reload
 common.hxml
 --cpp out/release
---cmd out/release/Main
+#--cmd out/release/Main
+--cmd echo "\nBuild complete: out/release/Main"

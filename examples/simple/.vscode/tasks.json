@@ -2,40 +2,70 @@
 	"version": "2.0.0",
 	// every task's, unless it sets its own
 	"options": {
-		"cwd": "${workspaceFolder}"
+		"cwd": "${workspaceFolder}",
 	},
 	"presentation": {
 		"reveal": "always",
 		"clear": true,
 		"showReuseMessage": false,
-		"close": false
+		"close": false,
+		"echo": true
 	},
 	"tasks": [
 		{
 			"label": "build hot",
-			"detail": "hot reload: edit src/Simple.hx while it runs",
+			"detail": "hot reload",
 			"type": "shell",
 			"command": "haxe",
-			"args": ["common.hxml", "-D", "hotreload", "-debug", "-lib", "hxcpp-debug-server", "--cpp", "out/hot"],
+			"args": [
+				"common.hxml",
+				"-D",
+				"hotreload",
+				"-debug",
+				"-lib",
+				"hxcpp-debug-server",
+				"--cpp",
+				"out/hot"
+			],
 			"group": "build",
-			"problemMatcher": ["$haxe-absolute", "$haxe"]
+			"problemMatcher": [
+				"$haxe-absolute",
+				"$haxe"
+			]
 		},
 		{
 			"label": "build debug",
 			"detail": "no hot reload",
 			"type": "shell",
 			"command": "haxe",
-			"args": ["common.hxml", "-debug", "-lib", "hxcpp-debug-server", "--cpp", "out/debug"],
+			"args": [
+				"common.hxml",
+				"-debug",
+				"-lib",
+				"hxcpp-debug-server",
+				"--cpp",
+				"out/debug"
+			],
 			"group": "build",
-			"problemMatcher": ["$haxe-absolute", "$haxe"]
+			"problemMatcher": [
+				"$haxe-absolute",
+				"$haxe"
+			]
 		},
 		{
 			"label": "build release",
 			"type": "shell",
 			"command": "haxe",
-			"args": ["common.hxml", "--cpp", "out/release"],
+			"args": [
+				"common.hxml",
+				"--cpp",
+				"out/release"
+			],
 			"group": "build",
-			"problemMatcher": ["$haxe-absolute", "$haxe"]
+			"problemMatcher": [
+				"$haxe-absolute",
+				"$haxe"
+			]
 		},
 		{
 			"label": "run release",
@@ -52,7 +82,18 @@
 				"kind": "build",
 				"isDefault": true
 			},
-			"problemMatcher": ["$haxe-absolute", "$haxe"]
+			// vshaxe's own task, customized here: the file-wide presentation doesn't reach it
+			"presentation": {
+				"reveal": "always",
+				"clear": true,
+				"showReuseMessage": false,
+				"close": false,
+				"echo": false
+			},
+			"problemMatcher": [
+				"$haxe-absolute",
+				"$haxe"
+			]
 		}
 	]
 }

@@ -1,4 +1,4 @@
-# build and run a debug build, no hot reload
+# build a debug build, no hot reload
 common.hxml
 -debug
 
@@ -6,4 +6,5 @@ common.hxml
 -lib hxcpp-debug-server
 
 --cpp out/debug
---cmd out/debug/Main-debug
+#--cmd out/debug/Main-debug
+--cmd echo "\nBuild complete: out/debug/Main-debug"

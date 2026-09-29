@@ -1,4 +1,4 @@
-# build and run with hot reload: edit src/Simple.hx while it runs
+# build with hot reload: edit src/Simple.hx while it runs
 common.hxml
 -D hotreload
 -debug
@@ -7,4 +7,5 @@ common.hxml
 -lib hxcpp-debug-server
 
 --cpp out/hot
---cmd out/hot/Main-debug
+#--cmd out/hot/Main-debug
+--cmd echo "\nBuild complete: out/hot/Main-debug"

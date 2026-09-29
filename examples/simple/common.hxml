@@ -7,3 +7,4 @@
 --main Main
 # 64-bit on every OS: hxcpp builds 32-bit on Windows unless told otherwise
 -D HXCPP_M64
+-D HXCPP_QUIET
