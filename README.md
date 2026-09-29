@@ -302,10 +302,17 @@ hxcpp-debugger, the VS Code extension: their fixes for debugging cppia aren't up
 yet. With them, breakpoints hit in the reloaded code and stay on their lines after a
 reload.
 
-- [robknopf/hxcpp](https://github.com/robknopf/hxcpp): `haxelib dev hxcpp <its clone>`
-- [robknopf/hxcpp-debugger](https://github.com/robknopf/hxcpp-debugger): the extension,
-  installed from the `.vsix` in its repo (`code --install-extension <the .vsix>`), and the
-  debug server the program links, `haxelib dev hxcpp-debug-server <its clone>/hxcpp-debug-server`
+```bash
+haxelib git hxcpp https://github.com/robknopf/hxcpp
+haxelib git hxcpp-debug-server https://github.com/robknopf/hxcpp-debugger master hxcpp-debug-server
+code --install-extension hxcpp-debugger-<version>.vsix   # from the root of robknopf/hxcpp-debugger
+```
+
+The first is hxcpp itself, the second the debug server the program links (a directory of
+the debugger's repo), and the third the VS Code extension, whose `.vsix` is in that repo.
+A git hxcpp builds its own build tool on first use; if it doesn't, run `haxe compile.hxml`
+in its `tools/hxcpp/`. To work on the forks themselves, clone them and use `haxelib dev`
+instead (`haxelib dev hxcpp-debug-server <the clone>/hxcpp-debug-server`).
 
 A hot build to debug has `-debug` and `-lib hxcpp-debug-server`, as the examples' `build
 hot` tasks and `Hot (hxcpp)` launch configurations do. In a `-debug` build the modules run
