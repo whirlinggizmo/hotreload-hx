@@ -17,8 +17,9 @@ run fast or call C. Pick by what you're reloading, not by language.
   reload as before. Reloaded Haxe code runs 5–13× slower under cppia's JIT, and up to 56×
   slower interpreted. Nim's reloaded code can also call any C function; Haxe's only
   reaches native code the executable already compiled.
-- **Both have bugs** (below). Two of hotreload-nim's silently corrupt state across a reload;
-  hotreload-hx runs stale code after a restart until the first edit.
+- **Both had bugs** (below). hotreload-nim's two that silently corrupted state across a
+  reload, enums and refs shared between hot globals, are fixed; hotreload-hx still runs
+  stale code after a restart until the first edit.
 
 ## How it was measured
 
@@ -95,12 +96,12 @@ but that call still runs the version from before the reload.
 | S3 | Add a field with a default to a type in hot state | Works: the new field gets its default | Works: the new field runs its initializer |
 | S4 | Rename a field | Value lost (by design) | Value lost (by design) |
 | S5 | Field type int → float | Reset to the default | Carried (3 stays 3) |
-| S6 | Hot global's own type int → string | Reset; the message wrongly says "carried over what still fits" | Reset; the message says it started over |
-| S7 | Insert an enum member at the front | **Wrong:** keeps the ordinal, so `Blue` becomes `Green` | Works: by name, `Happy(1)` stays `Happy(1)` |
+| S6 | Hot global's own type int → string | Reset; the message says it started over (fixed: it used to say "carried over what still fits") | Reset; the message says it started over |
+| S7 | Insert an enum member at the front | Works: by name, `Blue` stays `Blue` (fixed: it kept the ordinal, so `Blue` became `Green`) | Works: by name, `Happy(1)` stays `Happy(1)` |
 | S8 | Hot state holding a subclass object | Refused when the executable compiles | Works: runs the new override |
 | S9 | A closure stored in hot state | Refused when the executable compiles | Accepted; the closure runs old code |
 | S10 | A callback made before a reload, called after | Old code; **writes to ref-holding globals are lost on every reload** | Old code; its writes land (one storage for the whole run) |
-| S11 | Shared refs and cycles in hot state | Works inside one global; **refs shared between two globals split after the first reload** | Works (one identity map for all hot statics; tested within one) |
+| S11 | Shared refs and cycles in hot state | Works, within one global and between two (fixed: refs shared between two globals split after the first reload) | Works (one identity map for all hot statics; tested within one) |
 | S12 | Add a new source file | Works | Works |
 | S13 | Change a hot function's signature | Refused; old code runs; reverting reloads | Refused; old code runs; reverting reloads |
 | S14 | An object the main module made, called after a reload | Old code (hot procs on it run new code) | Old code (the executable's own copy of the class) |
@@ -122,14 +123,15 @@ Nim's breakpoint behaviour is from its README, not retested here.
 
 ## Bugs found
 
-None are fixed yet.
+hotreload-nim's enum, shared-ref and message bugs were fixed on 2026-09-29, with unit tests
+in `tests/tmigrate.nim`, and scenarios S3–S7 and S10–S11 rerun.
 
 | Library | Bug | Reproduce | Likely fix |
 | --- | --- | --- | --- |
-| hotreload-nim | Enums are carried by ordinal, so inserting a member changes a stored value's meaning | `type Color = enum Red, Green, Blue`; `var c {.hot.} = Red`; set `c = Blue`; insert `Black` first: `c` reads `Green` | `migrate.nim`: write enums by name, match by name on load |
-| hotreload-nim | Refs shared between two hot globals become separate copies after any reload | `var na {.hot.} = Node(); var nb {.hot.} = Node()`; `na.buddy = nb; nb.buddy = na`; any body edit: `na.buddy == nb` is false, and one copy goes stale | Copy all hot globals in one pass, with one identity table |
+| hotreload-nim | **Fixed.** Enums were carried by ordinal, so inserting a member changed a stored value's meaning | `type Color = enum Red, Green, Blue`; `var c {.hot.} = Red`; set `c = Blue`; insert `Black` first: `c` read `Green` | `migrate.nim` writes an enum's member name and finds it by name (sets of enums too) |
+| hotreload-nim | **Fixed.** Refs shared between two hot globals became separate copies after any reload | `var na {.hot.} = Node(); var nb {.hot.} = Node()`; `na.buddy = nb; nb.buddy = na`; any body edit: `na.buddy == nb` was false | One table of copies for every hot global a reload carries over, by `copy` or `load` |
 | hotreload-nim | A ref-holding global moves to new storage on every reload, not only when its type changes, so an old callback's writes to it are lost | A callback from before a reload writes `bag.n = 1`; the next tick shows `bag.n=0 hotMoves=2` | Follows from the copy on every reload; `hotMoves()` does detect it |
-| hotreload-nim | Type-change messages always say "carried over what still fits", even when the value was reset | Change a global's type int → string: the message says carried, the value is the new first value | Say which values were reset |
+| hotreload-nim | **Fixed.** Type-change messages always said "carried over what still fits", even when the value was reset | Change a global's type int → string | The message names what was dropped or reset, or says it started over |
 | hotreload-nim | The default hot build (`-Og`) runs slower after the first reload | The speed loop B, before and after a reload: 170 → 258 ms | Build the library with the executable's flags; `-d:release` is unaffected |
 | hotreload-hx | A restarted program runs the code it was built with, not what's on disk, until the first edit | Edit `src/` while it's stopped, then start it: the old code runs | Swap in the startup warm-up build when the sources are newer than the executable |
 | hotreload-hx | "Bad link", when new code needs native code the executable lacks, doesn't say why or that a restart fixes it | Call a new extern, or `sys.db.Sqlite`, in reloaded code | Catch it; name the class, and say to restart |
