@@ -340,6 +340,10 @@ one's classes. The executable's own compiled copies of the reloaded classes run 
 first reload; they're renamed (`_hot.Game`), so the modules' classes, under their own
 names, don't collide with them.
 
+A module is read into memory whole, and its file is deleted as soon as it's loaded, so
+however the program stops, even by Ctrl-C, none is left behind. The next run deletes any a
+run left while it was building one.
+
 ## Limits
 
 - Only hxcpp reloads, through cppia. A hot build for another target builds without it,
@@ -354,7 +358,8 @@ names, don't collide with them.
   (an extern), fails to load, with "Bad link". Restart to build it in.
 - A program started again runs the code it was built with, not what's in the sources now,
   until the next change reloads. Rebuild after editing a stopped program.
-- Old modules aren't freed.
+- Old modules aren't freed: old code may still run. Memory grows with each reload, about
+  1.25 MB in `examples/simple` (a `-debug` build). A restart gives it back.
 - A change to the main class, or to a `@:hot` function's signature, requires a restart.
 - A class in the reloaded code with its own `@:native` can't be reloaded.
 

@@ -83,6 +83,7 @@ class Reloader {
 		// the JIT compiles a module to native code: quicker, but no breakpoints in it
 		cpp.cppia.Host.enableJit(!config.debug);
 		importInfo = writeImportInfo();
+		removeModules();
 		stamps = sources();
 		var names = [for (root in config.roots) root.split(".").join("/") + ".hx"];
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
@@ -119,6 +120,9 @@ class Reloader {
 					swap(building);
 				else
 					Sys.println("hotreload: build failed; still running the last one");
+				// a module is read into memory whole, so its file goes as soon as it's loaded:
+				// however the program stops (Ctrl-C runs no exit code), no module is left behind
+				removeFile(building);
 				building = null;
 				if (changedSince) {
 					changedSince = false;
@@ -161,6 +165,21 @@ class Reloader {
 			else
 				startBuild();
 		}
+	}
+
+	/** the modules an earlier run left, if it stopped while one was building **/
+	function removeModules() {
+		var module = new EReg("^(" + config.mainClass.toLowerCase() + "_[0-9]+|warmup)\\.cppia$", "");
+		for (entry in (try FileSystem.readDirectory(config.buildDir) catch (_) []))
+			if (module.match(entry))
+				removeFile(config.buildDir + "/" + entry);
+	}
+
+	static function removeFile(path:String) {
+		try {
+			if (FileSystem.exists(path))
+				FileSystem.deleteFile(path);
+		} catch (_) {}
 	}
 
 	/** the .hx files in the reloaded code's directories and below, but the main class's, and when each last changed **/
