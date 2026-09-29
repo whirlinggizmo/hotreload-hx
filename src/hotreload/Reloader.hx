@@ -241,8 +241,11 @@ class Reloader {
 			"-D", "dll_import=" + importInfo,
 			"--cppia", out
 		]).concat(config.roots);
-		if (changedPaths.length > 0)
-			args = args.concat(["-D", "hotreload_invalidate=" + changedPaths.join("|")]);
+		// the changed files through a file, whose path (a define) is the same each build: a
+		// define whose value changed would give the compilation server a new context each time
+		var list = config.buildDir + "/changed.txt";
+		File.saveContent(list, changedPaths.join("\n"));
+		args = args.concat(["-D", 'hotreload_invalidate=$list']);
 		changedPaths = [];
 		if (serverProcess != null && serverProcess.exitCode(false) != null) {
 			Sys.println("hotreload: the compilation server stopped; building without it");

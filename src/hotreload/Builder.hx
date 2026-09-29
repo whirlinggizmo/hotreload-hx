@@ -16,6 +16,8 @@ private enum Mode {
 	Off;
 	Host;    // the executable's build: -D hotreload
 	Library; // a reload's build, which the reloader starts: -D hotreload_library
+	Js;       // a JS build: -D hotreload, which hotreload.DevServer serves and rebuilds
+	JsReload; // a JS reload's build, which the DevServer starts: -D hotreload_reload
 }
 #end
 
@@ -33,6 +35,13 @@ private enum Mode {
 
 	In a reload's build (the library), the reloaded code is compiled to one cppia module,
 	against the executable's classes (`-D dll_import`).
+
+	A JS build reloads whole: the page loads the new bundle beside the old one, and the
+	reloader (Reloader.js.hx) makes its classes the current ones, statics, objects and all.
+	So `@:hot` means nothing there: every static and function reloads. What it takes from
+	here: a guard that keeps a reloaded bundle's `main` from running again, each class's
+	field initializers, for the objects a reload carries over (their new fields start
+	from them), the reload hooks, and, for the DevServer, how to build it again.
 **/
 class Builder {
 	/** what the executable's copy of a reloaded class is renamed to: `_hot.` and its path. A reload strips it again **/
@@ -47,6 +56,10 @@ class Builder {
 	static var configured = false;
 
 	public static function init() {
+		// once per build, however many times the build names the library
+		if (Context.defined("hotreload_initialized"))
+			return;
+		Compiler.define("hotreload_initialized");
 		// a compilation server keeps a macro's statics from one build to the next
 		mode = Off;
 		mainClass = null;
@@ -60,15 +73,15 @@ class Builder {
 			libraryDirs = Context.definedValue("hotreload_dirs").split("|");
 			libraryMain = Context.definedValue("hotreload_main");
 			Compiler.define("dce", "no");
-			// a compilation server notices a changed file by its time, in whole seconds, so
-			// it would miss a save in the same second as the last build's: the reloader
-			// names the files that changed since the last build started
-			if (Context.defined("hotreload_invalidate"))
-				try haxe.macro.CompilationServer.invalidateFiles(Context.definedValue("hotreload_invalidate").split("|")) catch (_) {}
+			invalidate();
+		} else if (Context.defined("hotreload") && Context.defined("js")) {
+			mode = Context.defined("hotreload_reload") ? JsReload : Js;
+			invalidate();
+			initJs();
 		} else if (Context.defined("hotreload")) {
 			if (!Context.defined("cpp") || Context.defined("cppia")) {
 				// (an init macro's warning isn't shown)
-				Sys.stderr().writeString("hotreload: only a cpp build reloads for now; this one builds without it\n");
+				Sys.stderr().writeString("hotreload: only a cpp or a JS build reloads; this one builds without it\n");
 				Sys.stderr().flush();
 				return;
 			}
@@ -113,6 +126,77 @@ class Builder {
 				return;
 			configured = true;
 			configure(types, cwd, buildDir, libraryArgs(args));
+		});
+	}
+
+	/**
+		A compilation server notices a changed file by its time, in whole seconds, so it would
+		miss a save in the same second as the last build's: the reloader writes the files
+		that changed since the last build started to a file, which this names to the server.
+		A file, not a define, since a define whose value changed each build would give the
+		server a new context each time, and nothing cached
+	**/
+	static function invalidate() {
+		if (!Context.defined("hotreload_invalidate"))
+			return;
+		var list = try sys.io.File.getContent(Context.definedValue("hotreload_invalidate")) catch (_) "";
+		var files = [for (f in list.split("\n")) if (f != "") f];
+		if (files.length > 0)
+			try haxe.macro.CompilationServer.invalidateFiles(files) catch (_) {}
+	}
+
+	static function initJs() {
+		var args = Sys.args();
+		var js = null;
+		var i = 0;
+		while (i < args.length) {
+			switch (args[i]) {
+				case "-main" | "--main" | "-m":
+					mainClass = args[i + 1];
+				case "-js" | "--js":
+					js = args[i + 1];
+			}
+			i++;
+		}
+		if (mode == JsReload)
+			return;
+		if (args.contains("--next") || args.contains("--each"))
+			Context.fatalError("hotreload: a hot build is one build: take --next and --each out of its hxml", Context.currentPos());
+		var cwd = Path.addTrailingSlash(Sys.getCwd());
+		var path = Context.defined("hotreload_config") ? Context.definedValue("hotreload_config") : absolute(cwd, js) + ".hotreload.json";
+		Context.onAfterTyping(types -> {
+			if (configured)
+				return;
+			configured = true;
+			var mainFile = null;
+			for (t in types)
+				switch (t) {
+					case TClassDecl(_.get() => c) if (fullName(c.pack, c.name) == mainClass):
+						mainFile = fileOf(c.pos);
+					default:
+				}
+			// the project's own class paths (inside its directory; not the standard library's or
+			// a haxelib's), or else the main class's directory: watched, and below
+			var dirs = [];
+			var j = 0;
+			while (j < args.length) {
+				if ((args[j] == "-cp" || args[j] == "-p" || args[j] == "--class-path") && j + 1 < args.length) {
+					var dir = Path.removeTrailingSlashes(Path.normalize(absolute(cwd, args[j + 1])));
+					if (dir.startsWith(Path.removeTrailingSlashes(cwd)) && FileSystem.exists(dir) && !dirs.contains(dir))
+						dirs.push(dir);
+				}
+				j++;
+			}
+			if (dirs.length == 0 && mainFile != null)
+				dirs.push(Path.directory(mainFile));
+			var config:JsConfig = {
+				cwd: cwd,
+				args: [for (a in args) a],
+				dirs: dirs,
+				js: Path.normalize(absolute(cwd, js)),
+				mainClass: mainClass,
+			};
+			sys.io.File.saveContent(path, haxe.Json.stringify(config, "\t"));
 		});
 	}
 
@@ -212,6 +296,8 @@ class Builder {
 		var cls = ref.get();
 		var fields = Context.getBuildFields();
 		var className = fullName(cls.pack, cls.name);
+		if (mode == Js || mode == JsReload)
+			return buildJs(cls, fields, className);
 		var changed = false;
 		var hasHot = false;
 		var result = [];
@@ -262,7 +348,8 @@ class Builder {
 
 		if (mode == Library && !cls.isInterface && !cls.isExtern && fileOf(cls.pos) != null) {
 			var file = fileOf(cls.pos);
-			if (inside(file, libraryDirs) && className != libraryMain) {
+			// (an abstract's fields aren't an object's: no initializers for them)
+			if (inside(file, libraryDirs) && className != libraryMain && !cls.kind.match(KAbstractImpl(_))) {
 				var init = fieldInitializer(className, fields);
 				if (init != null) {
 					extra.push(init);
@@ -396,6 +483,97 @@ class Builder {
 		});
 		extra.push(staticVar('__hot_reg_$name', macro:Bool, macro hotreload.Hooks.proc($v{className}, $v{name}, $v{sig}, fn -> $i{target} = fn),
 			field.pos));
+	}
+
+	/** a JS build's class: its hooks, its main's guard, its field initializers, and its statics' types **/
+	static function buildJs(cls:ClassType, fields:Array<Field>, className:String):Array<Field> {
+		var changed = false;
+		var result = [];
+		var extra = [];
+		var types = [];
+		for (field in fields) {
+			// a static's type, as written (or its first value's): a reload that changes it
+			// starts the static over, rather than carry a value of the old type into it
+			if (field.access.contains(AStatic))
+				switch (field.kind) {
+					case FVar(t, e) | FProp(_, _, t, e):
+						var sig = if (t != null) t.toString() else if (e != null) try Context.typeof(e).toString() catch (_) null else null;
+						if (sig != null)
+							types.push({field: field.name, expr: macro $v{sig}});
+					default:
+				}
+			var hook = field.meta.find(m -> m.name == ":beforeHotReload" || m.name == ":afterHotReload");
+			if (hook != null) {
+				var fn = switch (field.kind) {
+					case FFun(f) if (field.access.contains(AStatic)): f;
+					default: Context.error('@${hook.name}: a static function', field.pos);
+				}
+				if (fn.args.length > 0)
+					Context.error('@${hook.name}: a function with no parameters', field.pos);
+				var after = hook.name == ":afterHotReload";
+				var name = field.name;
+				extra.push(staticVar('__hot_hook_$name', macro:Bool, macro hotreload.Hooks.add($v{after}, $i{name}), field.pos));
+				changed = true;
+			} else if (field.name == "main" && field.access.contains(AStatic) && isMain(cls)) {
+				switch (field.kind) {
+					case FFun(f):
+						// a reloaded bundle's classes replace the running ones: its main mustn't
+						// start the program a second time
+						f.expr = macro {
+							if (hotreload.Reloader.isReload())
+								return;
+							${f.expr};
+						}
+						changed = true;
+					default:
+				}
+			}
+			result.push(field);
+		}
+		var file = fileOf(cls.pos);
+		var abstractImpl = cls.kind.match(KAbstractImpl(_)) || Context.getLocalType().match(TAbstract(_, _));
+		if (types.length > 0 && !cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
+			extra.push(staticVar("__hot_types__", macro:Dynamic, {expr: EObjectDecl(types), pos: cls.pos}, cls.pos));
+			changed = true;
+		}
+		if (!cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
+			var init = jsFieldInitializer(className, fields);
+			if (init != null) {
+				extra.push(init);
+				changed = true;
+			}
+		}
+		return changed ? result.concat(extra) : null;
+	}
+
+	/**
+		A JS class's field initializers, for an object a reload carries over: each of its
+		fields that the object doesn't have (a new one) starts from its initializer
+	**/
+	static function jsFieldInitializer(className:String, fields:Array<Field>):Field {
+		var inits = [];
+		for (f in fields) {
+			if (f.access.contains(AStatic))
+				continue;
+			var e = switch (f.kind) {
+				case FVar(_, e) if (e != null): e;
+				case FProp("default" | "null", "default" | "null" | "never", _, e) if (e != null): e;
+				default: null;
+			}
+			if (e != null) {
+				var name = f.name;
+				inits.push(macro if (!std.Reflect.hasField(this, $v{name})) this.$name = $e);
+			}
+		}
+		if (inits.length == 0)
+			return null;
+		return {
+			name: "__hot_init_" + className.replace(".", "_"),
+			access: [APublic],
+			meta: [{name: ":keep", pos: Context.currentPos()}, {name: ":noCompletion", pos: Context.currentPos()}],
+			kind: FFun({args: [], ret: macro:Void, expr: macro $b{inits}}),
+			pos: Context.currentPos(),
+		};
 	}
 
 	/**
@@ -565,7 +743,8 @@ class Builder {
 	/** the standard library's directory, whose inline functions are left alone **/
 	static function stdDir():String {
 		if (std == null)
-			std = Path.addTrailingSlash(Path.directory(Path.normalize(FileSystem.absolutePath(Context.resolvePath("Std.hx")))));
+			// StdTypes.hx is only at the standard library's root (Std.hx is overridden per target, in cpp/_std/, js/_std/)
+			std = Path.addTrailingSlash(Path.directory(Path.normalize(FileSystem.absolutePath(Context.resolvePath("StdTypes.hx")))));
 		return std;
 	}
 
@@ -592,6 +771,23 @@ class Builder {
 		return file != null && dirs.exists(d -> file.startsWith(d + "/"));
 	}
 	#end
+}
+
+/** how a JS hot build was made, for the DevServer to build it again **/
+typedef JsConfig = {
+	/** the build's directory, which its paths are from **/
+	var cwd:String;
+
+	/** its command line, whole: a reload's build writes the same bundle **/
+	var args:Array<String>;
+
+	/** where the sources are: the project's own class paths, watched, and below **/
+	var dirs:Array<String>;
+
+	/** the bundle **/
+	var js:String;
+
+	var mainClass:String;
 }
 
 /** how the executable's build was made, for the Reloader to build the reloaded code again **/

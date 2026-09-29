@@ -9,7 +9,8 @@ no reloading and no cost.
 
 It's the Haxe side of [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim), and
 works the same way. On hxcpp, the reloaded code is built as a cppia module and run by the
-executable's cppia host.
+executable's cppia host. On JS (a page, or node), the whole bundle is rebuilt and the
+running one takes on its classes: see [JavaScript](#javascript).
 
 ## Requirements
 
@@ -344,10 +345,68 @@ A module is read into memory whole, and its file is deleted as soon as it's load
 however the program stops, even by Ctrl-C, none is left behind. The next run deletes any a
 run left while it was building one.
 
+## JavaScript
+
+On JS, a hot build is served by hotreload's dev server, which rebuilds the bundle when a
+source changes. The page (or a node program) loads each new bundle beside the running one
+and takes on its classes, between two frames. The page's own state stays, and with it
+whatever it made: a wasm engine, the GPU's state, loaded assets, open connections.
+
+```bash
+haxe -lib hotreload-hx --run hotreload.DevServer [--port 8080] [--mount /url=dir] build.web.hxml
+```
+
+The build's own arguments (an hxml) follow the options: the dev server adds
+`-lib hotreload-hx` and `-D hotreload`, serves the build's output directory at
+`http://localhost:8080/`, and watches the build's class paths inside its directory.
+`--mount /assets=../assets` serves another directory beside it, with Range requests, which
+an engine streaming its assets uses. A node program asks the dev server at
+`HOTRELOAD_URL` (`http://localhost:8080/__hotreload` by default).
+
+Nothing to call and nothing to mark: every class reloads, the main class too, and so
+`@:hot` means nothing here (hxcpp code that uses it builds as it is). What a reload does:
+
+- each static keeps its value, on the new class. One whose type the new code declares
+  differently starts over from its first value, and says so;
+- the objects the statics hold are given the new classes, in place: the same objects, so
+  every reference to them is still good. A field an object doesn't have yet (a new one)
+  starts from its initializer, and an enum value is made again by its constructor's name;
+- the old classes forward to the new ones, so old code still around (an object nothing
+  walked to, a callback that calls through a class) runs the new code, on the same state;
+- a method reference in a static (`onFrame = Guest.frame`) becomes the new code's;
+- the hooks run as on hxcpp: `@:beforeHotReload` on the old code, `@:afterHotReload` on
+  the new.
+
+A signature change needs no restart, since every caller reloads with it. What keeps the
+code it came from: a closure, or a bound method (`obj.method` as a value), made before the
+reload. Each old bundle's code is freed once nothing refers to it, but the first's, which
+keeps the connection to the dev server.
+
+A reloaded bundle runs as fast as the first, on the same JIT: in node, the benchmark
+`tests/matrix` runs (a math loop and an object loop) took 28 ms and 8 ms before a reload,
+30–37 ms and 7–9 ms after. wgrender-hx's `simple` example, as a guest in a page, reloaded
+0.23–0.25 s after a save (a build takes 44–50 ms through the compilation server; the first
+reload, 0.58 s):
+
+```bash
+cd examples/simple    # in wgrender-hx
+haxe -lib hotreload-hx --run hotreload.DevServer --reload-define wgr-host=none \
+  --mount /assets=../../project/lib/wgrender-c/examples/assets build.web.hxml -D wgr-host=full
+```
+
+The two wgrender-hx defines say what a hot build of a wgrender guest needs: a host that
+exports all of wgrender (`-D wgr-host=full`), since reloaded code may call what the first
+build didn't, and no host at all for a reload's build (`--reload-define wgr-host=none`,
+the define for the reload's builds only), since the page has it loaded already. A reload's
+build has the first build's arguments, then its own, and the later define wins.
+
 ## Limits
 
-- Only hxcpp reloads, through cppia. A hot build for another target builds without it,
-  with a warning.
+- hxcpp reloads through cppia, and JS through the dev server. A hot build for another
+  target builds without it, with a warning.
+- On JS, a field renamed or removed is gone from carried objects (`undefined` rather than
+  a type's default, since JS has none), and a closure or bound method made before a
+  reload runs its old code.
 - A hot build is bigger and slower to build: `-D scriptable` and `-dce no` keep every
   class the executable has, whole, for the modules to call.
 - The reloaded code runs in cppia, which is slower than hxcpp's native code: measured at
@@ -378,10 +437,13 @@ src/hotreload/
   Slot.hx, Slots.hx      hot statics' storage, which the executable keeps
   Hooks.hx               the reload hooks, and the executable's @:hot functions
   Migrate.hx             carrying the hot statics' objects over to the new classes
+  Reloader.js.hx         the JS reloader, which a hot JS build starts by itself
+  JsSwap.hx              JS: loading a new bundle, and making its classes the current ones
+  DevServer.hx           JS: building hot, serving it, and rebuilding on a change
 docs/comparison.md       hotreload-nim and hotreload-hx, measured side by side
 tests/                   `haxe tests/run.hxml`: a smoke test that builds tests/reload/
                          hot, runs it and edits it while it runs
-tests/matrix/            the capability matrix behind docs/comparison.md
+tests/matrix/            the capability matrix behind docs/comparison.md, for hxcpp and JS
 examples/hello/          a console application: src/Main.hx, its main class, and
                          src/Hello.hx, which is reloaded
 examples/simple/         wgrender-hx's simple example, hot reloaded: a window, a scene,

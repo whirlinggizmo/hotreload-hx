@@ -3,10 +3,10 @@ Imported by the scenario scripts."""
 import os, re, shutil, subprocess, sys, time
 
 class Program:
-    def __init__(self, cwd, argv, log):
+    def __init__(self, cwd, argv, log, env=None):
         self.cwd, self.log = cwd, log
         self.out = open(log, "w")
-        self.p = subprocess.Popen(argv, cwd=cwd, stdout=self.out, stderr=subprocess.STDOUT)
+        self.p = subprocess.Popen(argv, cwd=cwd, stdout=self.out, stderr=subprocess.STDOUT, env=env)
         self.pos = 0
     def lines(self):
         with open(self.log) as f:

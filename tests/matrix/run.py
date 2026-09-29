@@ -6,6 +6,8 @@ fails on its own.
     python3 tests/matrix/run.py            both parts
     python3 tests/matrix/run.py matrix     S1-S15, S17, S18: one program, edited in turn
     python3 tests/matrix/run.py perf       S16: the speed of reloaded code
+    python3 tests/matrix/run.py js         the same scenarios for JS, in node, through
+                                           hotreload.DevServer
 """
 import os, shutil, subprocess, sys, time
 
@@ -116,10 +118,63 @@ def perf():
             edit(bench, "@:hot static var dummy = 0;  ", "@:hot static var dummy = 0;")
 
 
+def js():
+    """the matrix for JS: the DevServer builds and serves it, node runs it"""
+    import socket
+    fresh_sources()
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = Program(HERE, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build-js.hxml"],
+                     os.path.join(LOGS, "js-server.log"))
+    game = os.path.join(HERE, "src", "Game.hx")
+    p = None
+    try:
+        if not server.wait(r"hotreload: serving", timeout=120, show=False):
+            sys.exit("the DevServer didn't start")
+        env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
+        p = Program(HERE, ["node", "out/js/main.js"], os.path.join(LOGS, "js.log"), env=env)
+        step("v1, as built")
+        p.wait(r"^report v1")
+
+        step("v2: S1-S5, S7-S12, S14 at once (see v2/)")
+        install(os.path.join(HERE, "v2"), os.path.join(HERE, "src"))
+        p.wait(r"^report v2")
+        time.sleep(1.2)
+        held = [l for l in open(os.path.join(LOGS, "js.log")) if l.startswith("main:")]
+        print("    | " + held[-1].strip() + "   (S10, S14: kept by the main class)")
+
+        step("S6: a hot static's type, Int -> String")
+        edit(game, "@:hot static var label = 7;", '@:hot static var label = "seven";')
+        p.wait(r"^report v2")
+
+        step("S13: a @:hot function's signature")
+        edit(game, "@:hot public static function tick()", "@:hot public static function tick(n:Int = 1)")
+        p.wait(r"^report v2|reloaded")
+
+        step("S15: a compile error, then the fix (the terminal has the error)")
+        edit(game, "static function report() {", "static function report() { oops")
+        server.wait(r"build failed", timeout=30)
+        edit(game, "static function report() { oops", "static function report() {")
+        p.wait(r"^report v2")
+
+        step("S18: haxe.Json, which the first build didn't use")
+        line = "\n\t\tSys.println('S18=' + haxe.Json.parse('{\"a\":[1,2]}').a[1]);"
+        edit(game, "static function report() {", "static function report() {" + line)
+        p.wait(r"^S18=")
+    finally:
+        if p:
+            p.stop()
+        server.stop()
+        fresh_sources()
+
+
 if __name__ == "__main__":
     os.makedirs(LOGS, exist_ok=True)
-    what = sys.argv[1:] or ["matrix", "perf"]
+    what = sys.argv[1:] or ["matrix", "perf", "js"]
     if "matrix" in what:
         matrix()
     if "perf" in what:
         perf()
+    if "js" in what:
+        js()

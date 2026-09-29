@@ -1,0 +1,8 @@
+# the matrix for JS: run.py js serves it with hotreload.DevServer and runs it in node
+# src/ then js/: the later class path wins, so js/Main.hx and js/Sys.hx are the ones used
+-cp src
+-cp js
+-lib hotreload-hx
+--main Main
+--js out/js/main.js
+-D js-es=6

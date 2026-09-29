@@ -7,19 +7,68 @@ and [hotreload-hx](https://github.com/whirlinggizmo/hotreload-hx/blob/main/docs/
 
 ## Summary
 
-hotreload-hx wins the day-to-day loop; hotreload-nim wins wherever the reloaded code has to
-run fast or call C. Pick by what you're reloading, not by language.
+Three ways to hot reload, and none best at everything: hotreload-hx on JS reloads fastest,
+runs reloaded code at full speed and takes the most kinds of change, but runs in a page or
+node; hotreload-nim is the only one whose reloaded code is native and can call anything;
+hotreload-hx on hxcpp (cppia) sits between them, and debugs best.
 
-- **hotreload-hx** reloads in 0.35–0.55 s, against 1.6–1.8 s. With the forked hxcpp and
-  hxcpp-debugger, its breakpoints stay aligned after a reload. It carries state by name,
-  and each hot static has one storage for the whole run.
-- **hotreload-nim** runs reloaded code natively: a release hot build runs the same after a
-  reload as before. Reloaded Haxe code runs 5–13× slower under cppia's JIT, and up to 56×
-  slower interpreted. Nim's reloaded code can also call any C function; Haxe's only
-  reaches native code the executable already compiled.
-- **Both had bugs** (below). hotreload-nim's two that silently corrupted state across a
-  reload, enums and refs shared between hot globals, are fixed; hotreload-hx still runs
-  stale code after a restart until the first edit.
+- **hotreload-hx, JS** (added 2026-09-29): 0.23–0.25 s from a save to the new code, the
+  same speed after a reload as before (V8), and nothing to mark: every class reloads,
+  and signature changes just reload.
+- **hotreload-hx, hxcpp**: 0.35–0.55 s. With the forked hxcpp and hxcpp-debugger, its
+  breakpoints stay aligned after a reload. Reloaded code runs 5–13× slower under cppia's
+  JIT, and up to 56× slower interpreted.
+- **hotreload-nim**: 1.6–1.8 s, but reloaded code runs natively (a release hot build the
+  same after a reload as before), and can call any C function.
+- **Bugs** (below): hotreload-nim's that silently corrupted state across a reload, enums
+  and refs shared between hot globals, are fixed; hotreload-hx on hxcpp still runs stale
+  code after a restart until the first edit.
+
+## All three, side by side
+
+The sections after this one compare hotreload-nim and hotreload-hx on hxcpp in detail; JS
+was measured the same way: wgrender-hx's `simple` as a guest in a headless browser, and
+`tests/matrix` (`run.py js`) in node.
+
+| | hotreload-nim | hotreload-hx, hxcpp (cppia) | hotreload-hx, JS |
+| --- | --- | --- | --- |
+| How it reloads | rebuilds the reloaded modules as a native shared library | rebuilds the reloaded code as a cppia module | rebuilds the whole bundle; the page takes on its classes |
+| What reloads | modules with `{.hot.}`, and what they import; not the main module | the hot classes' directories; not the main class | everything, the main class too |
+| What you mark | `{.hot.}` globals and procs | `@:hot` statics and functions | nothing |
+| Save to new code (`simple`) | 1.62–1.78 s | 0.35–0.55 s | 0.22–0.25 s (first reload 0.77 s) |
+| Build per reload | ~1.3 s | 0.05–0.07 s | 0.04–0.06 s |
+| Reloaded code's speed | native (release hot build: the same; `-Og`: 1.5× on one loop) | 5–13× slower (JIT), up to 56× (`-debug`) | the same as before the reload (V8) |
+| Memory per reload | ~0.2 MB, and a copy of ref-held hot state | ~1.25 MB | not measured (old bundles are collected, but the first) |
+| Files left behind | none | none | none (one bundle, rewritten) |
+| Hot build's program | a 7 MB executable | a 77 MB executable | a bundle, and a wasm host exporting all of wgrender |
+| Debugging reloaded code | gdb/lldb; breakpoints go stale after a reload | the hxcpp/debugger forks; breakpoints stay aligned (interpreted only) | browser devtools or VS Code; not tried across reloads |
+| Native code from reloaded code | any C function | only what the executable already compiled | any wgrender call (the hot host exports them all) |
+| Where it runs | Linux tested (macOS in CI; Windows needs MinGW) | Linux tested | a page, or node |
+| Release builds | ordinary, no cost | ordinary, no cost | ordinary, no cost |
+
+| # | Change made while running | hotreload-nim | hotreload-hx, cppia | hotreload-hx, JS |
+| --- | --- | --- | --- | --- |
+| S1 | Body of a hot function | Works | Works | Works |
+| S2 | Add a hot global/static | Works | Works | Works |
+| S3 | Add a field with a default | Works: its default | Works: its initializer | Works: its initializer |
+| S4 | Rename a field | value lost | value lost (0) | value lost (`undefined`) |
+| S5 | Field type int → float | reset to its default | carried | carried |
+| S6 | A static's own type int → string | reset, and says so | reset, and says so | reset, and says so |
+| S7 | Insert an enum member first | Works, by name | Works, by name | Works, by name |
+| S8 | Hot state holding a subclass object | refused at compile time | Works: the new override | Works: the new override |
+| S9 | A closure in hot state | refused at compile time | allowed; runs old code | allowed; runs old code |
+| S10 | A callback made before a reload | old code; writes to ref globals lost | old code; writes land | old code; writes land |
+| S11 | Shared refs and cycles | Works, in one global and between two | Works | Works |
+| S12 | Add a source file | Works | Works | Works |
+| S13 | Change a hot function's signature | refused; restart | refused; restart | Works: just reloads |
+| S14 | An object the main module made | old code (hot procs on it are new) | old code | new code |
+| S15 | A compile error | old code runs on; the fix reloads | old code runs on; the fix reloads | old code runs on; the fix reloads |
+| S16 | Speed of reloaded code | native | 5–56× slower | the same |
+| S17 | A native call the first build didn't make | Works: any C function | `__cpp__` refused; a new extern "Bad link" | any wgrender call; not tested |
+| S18 | A std module the first build didn't use | Works | pure Haxe works; native "Bad link" | Works |
+
+On S11, cppia and JS keep one identity map for all the statics, which covers two globals by
+design; their tests shared refs within one.
 
 ## How it was measured
 
@@ -147,3 +196,4 @@ directory, and a refused library still uses up its version number.
 | Per-frame work at scale: physics, per-entity updates, tight loops | hotreload-nim | Reloaded code runs natively, the same as the shipped build in a release hot build |
 | Engine-side, or calling C functions the executable doesn't already use | hotreload-nim | Reloaded Haxe code can only reach native code the executable already compiled |
 | Something you want to step through in a debugger while editing it | hotreload-hx | Its breakpoints survive a reload; Nim's go stale |
+| Game code that can run as a web guest (wgrender-hx's JS target) | hotreload-hx, JS | The fastest reloads, reloaded code at full speed, the most kinds of change, and nothing to mark |
