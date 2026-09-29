@@ -7,5 +7,6 @@ common.hxml
 -lib hxcpp-debug-server
 
 --cpp out/hot
-#--cmd out/hot/Main-debug
+
 --cmd echo "\nBuild complete: out/hot/Main-debug"
+#--cmd out/hot/Main-debug

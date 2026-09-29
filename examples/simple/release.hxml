@@ -1,5 +1,8 @@
 # build a release build, no hot reload
 common.hxml
+-dce full
+-D analyzer-optimize
 --cpp out/release
-#--cmd out/release/Main
+
 --cmd echo "\nBuild complete: out/release/Main"
+#--cmd out/release/Main
