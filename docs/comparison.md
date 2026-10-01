@@ -1,6 +1,6 @@
 # hotreload-nim vs hotreload-hx
 
-Measured 2026-09-29, on Linux, with Nim 2.2.12, Haxe 4.3.6 and hxcpp (a fork, for the
+Measured 2026-09-29 (program size: 2026-10-01), on Linux, with Nim 2.2.12, Haxe 4.3.6 and hxcpp (a fork, for the
 debugger). The same file is in both repos:
 [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim/blob/main/docs/comparison.md)
 and [hotreload-hx](https://github.com/whirlinggizmo/hotreload-hx/blob/main/docs/comparison.md).
@@ -104,6 +104,42 @@ The two full-build times aren't comparable: the Haxe build reused C++ from hxcpp
 cache. Haxe's first reload in a session is slower because the compilation server hasn't
 cached the edited files yet.
 
+## Reload time by program size
+
+Measured 2026-10-01 with hotreload-hx's `tests/scale/run.py`, on Haxe 4.3.6: a generated
+program of N classes (modules, for Nim), each about 60 lines, with a hot `Game` class and
+a chain of dependencies, C0 → C1 → … → C(N-1), so that the last class is one everything
+depends on. Build + swap is the time from the reloader's "building" line to the new
+code's first output; a save adds the reloader's 0.3–0.5 s wait for the file to settle.
+
+| Edit, build + swap | 100 classes | 1,000 classes | 3,000 classes |
+| --- | --- | --- | --- |
+| hxcpp, every class reloaded: the hot class | 0.07 s | 0.6 s | 1.8–1.9 s |
+| hxcpp, only the hot class reloaded, the rest in the executable | 0.02–0.04 s | 0.06–0.08 s | 0.2–0.3 s |
+| JS: the hot class | 0.05 s | 0.23 s | 0.8 s |
+| Nim: any edit | 0.9 s | 16.6–17.3 s | 167–201 s |
+
+A full hot build took 7 s, 59 s and about 155 s on hxcpp (the C++ compile), 0.3, 1.3 and
+5.0 s on JS, and 1.3, 17.5 and 168 s with Nim.
+
+Nim's reloads cost as much as its full build: `nim c` has no incremental mode, so every
+edit re-checks every module of the hot library (gcc then recompiles only the C files
+that changed), and it grows faster than the program does, 10× for 3× the modules. Haxe
+builds through its compilation server, which re-types only the changed files and what
+depends on them, and its reloads grow about linearly with what's in the module. With the
+big part of the program compiled into the executable and only the hot classes in the
+module, a reload barely grows at all.
+
+**Editing a class everything depends on** (C(N-1), at the end of the chain) hit a bug in
+the Haxe compilation server: 11 s at 1,000 classes and about 290 s at 3,000, the same on
+hxcpp and JS (and 6.6 s and 159 s on the 5.0 nightly), where a build without the server
+takes 1.5 s and 5 s. When the server skips a cached module whose dependency changed, it
+formats the reason, the whole dependency chain, into a string before deciding whether to
+print it, with a printer that's quadratic in the chain's depth: cubic in the depth, once
+per module on the chain. It takes a chain hundreds deep to notice: the same 1,000
+classes depending on the last one directly reload in 0.9 s. A fix is being sent
+upstream; until then it's a cost on every reload, tiny for ordinary programs.
+
 ## Speed of reloaded code
 
 "Before" is the same code compiled into the executable, before the first reload. "After"
@@ -183,6 +219,8 @@ in `tests/tmigrate.nim`, and scenarios S3–S7 and S10–S11 rerun.
 | hotreload-nim | **Fixed.** Type-change messages always said "carried over what still fits", even when the value was reset | Change a global's type int → string | The message names what was dropped or reset, or says it started over |
 | hotreload-nim | The default hot build (`-Og`) runs slower after the first reload | The speed loop B, before and after a reload: 170 → 258 ms | Build the library with the executable's flags; `-d:release` is unaffected |
 | hotreload-hx | A restarted program runs the code it was built with, not what's on disk, until the first edit | Edit `src/` while it's stopped, then start it: the old code runs | Swap in the startup warm-up build when the sources are newer than the executable |
+| hotreload-hx, JS | **Fixed.** From the second reload on, the main class kept running the first reload's code: each swap pointed the previous bundle's methods at the new code by copying them, so the first bundle, which the main class calls through, stayed pointed at the second | `tests/scale/run.py js --sizes 30`: the version line stops changing after the first reload | Each swap re-points the first bundle's classes at the new ones too |
+| Haxe | The compilation server takes cubic time in the depth of a dependency chain to skip the modules on it (above) | `tests/scale/run.py hx-all js --sizes 1000`, the "deep" edits | Format the skip reason only when it's printed, and in linear time |
 | hotreload-hx | "Bad link", when new code needs native code the executable lacks, doesn't say why or that a restart fixes it | Call a new extern, or `sys.db.Sqlite`, in reloaded code | Catch it; name the class, and say to restart |
 
 Minor, in hotreload-nim: old `lib*_N.so` files and Nim cache files pile up in the build

@@ -444,6 +444,7 @@ docs/comparison.md       hotreload-nim and hotreload-hx, measured side by side
 tests/                   `haxe tests/run.hxml`: a smoke test that builds tests/reload/
                          hot, runs it and edits it while it runs
 tests/matrix/            the capability matrix behind docs/comparison.md, for hxcpp and JS
+tests/scale/             reload time by program size, behind docs/comparison.md, for hxcpp, JS and Nim
 examples/hello/          a console application: src/Main.hx, its main class, and
                          src/Hello.hx, which is reloaded
 examples/simple/         wgrender-hx's simple example, hot reloaded: a window, a scene,

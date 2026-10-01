@@ -22,8 +22,11 @@ import js.Syntax;
 	   their initializers. An enum value is made again from the new enum, by its
 	   constructor's name;
 	4. the old classes forward to the new ones: their statics read and write the new
-	   classes', and their methods are the new code's. So old code still around (a
-	   callback, an object nothing walked to) runs the new code, on the same state.
+	   classes', and their methods are the new code's. The first bundle's classes are
+	   re-pointed on every swap too, since the main class, and anything else from before
+	   the first reload, calls through them: a copied method would stay the second
+	   bundle's. So old code still around (a callback, an object nothing walked to) runs
+	   the new code, on the same state.
 	   What it can't reach: a closure, or a bound method, made before the reload runs
 	   the code it came from;
 	5. the new code's `@:afterHotReload` hooks, and the main class's `afterReload`.
@@ -138,33 +141,41 @@ class JsSwap {
 			if (r.beforeReload != null)
 				r.beforeReload();
 
-		// the classes both bundles have, and their methods: old -> new
-		var pairs:Array<{name:String, o:Dynamic, n:Dynamic}> = [];
+		// the classes both bundles have, and their methods: old -> new. The first bundle's
+		// too, when it isn't the old one: the main class, and whatever else holds on to
+		// the first bundle's classes, calls through them, so they forward to the new code
+		// straight away, not through the bundles in between (which are let go)
+		var state:Dynamic = Syntax.code("globalThis.__hotreload");
+		var first:Dynamic = state.bundles[0];
+		var pairs:Array<{name:String, o:Dynamic, n:Dynamic, carry:Bool}> = [];
 		var protos:Dynamic = Syntax.code("new Map()");
 		var classes:Dynamic = Syntax.code("new Map()");
 		var functions:Dynamic = Syntax.code("new Map()");
-		for (name in Reflect.fields(neu.classes)) {
-			var o:Dynamic = Reflect.field(old.classes, name);
-			var n:Dynamic = Reflect.field(neu.classes, name);
-			if (o == null || o == n || StringTools.startsWith(name, "hotreload."))
-				continue;
-			pairs.push({name: name, o: o, n: n});
-			classes.set(o, n);
-			if (o.prototype != null && n.prototype != null)
-				protos.set(o.prototype, n.prototype);
-			for (key in methods(o))
-				if (Syntax.code("typeof {0}[{1}] == 'function'", n, key))
-					functions.set(Reflect.field(o, key), Reflect.field(n, key));
-			if (o.prototype != null && n.prototype != null)
-				for (key in methods(o.prototype))
-					if (key != "constructor" && Syntax.code("typeof {0}[{1}] == 'function'", n.prototype, key))
-						functions.set(Reflect.field(o.prototype, key), Reflect.field(n.prototype, key));
-		}
+		for (name in Reflect.fields(neu.classes))
+			for (from in (first == old || first == neu ? [old] : [old, first])) {
+				var o:Dynamic = Reflect.field(from.classes, name);
+				var n:Dynamic = Reflect.field(neu.classes, name);
+				if (o == null || o == n || StringTools.startsWith(name, "hotreload."))
+					continue;
+				pairs.push({name: name, o: o, n: n, carry: from == old});
+				classes.set(o, n);
+				if (o.prototype != null && n.prototype != null)
+					protos.set(o.prototype, n.prototype);
+				for (key in methods(o))
+					if (Syntax.code("typeof {0}[{1}] == 'function'", n, key))
+						functions.set(Reflect.field(o, key), Reflect.field(n, key));
+				if (o.prototype != null && n.prototype != null)
+					for (key in methods(o.prototype))
+						if (key != "constructor" && Syntax.code("typeof {0}[{1}] == 'function'", n.prototype, key))
+							functions.set(Reflect.field(o.prototype, key), Reflect.field(n.prototype, key));
+			}
 
 		// the statics' values, and what they hold
 		var walker = new Walker(protos, classes, functions, old.enums, neu.enums);
 		var moved = 0;
 		for (p in pairs) {
+			if (!p.carry)
+				continue; // the first bundle's statics already read the old one's
 			var oldTypes:Dynamic = Reflect.field(p.o, "__hot_types__");
 			var newTypes:Dynamic = Reflect.field(p.n, "__hot_types__");
 			for (key in statics(p.o))
@@ -200,9 +211,6 @@ class JsSwap {
 		}
 
 		// only the current bundle is kept: the old one's code goes once nothing uses it
-		var state:Dynamic = Syntax.code("globalThis.__hotreload");
-		var bundles:Array<Dynamic> = state.bundles;
-		var first = bundles[0];
 		state.bundles = first == neu ? [neu] : [first, neu];
 
 		var newHooks:Dynamic = Reflect.field(neu.classes, "hotreload.Hooks");
@@ -211,7 +219,7 @@ class JsSwap {
 		for (r in reloaders)
 			if (r.afterReload != null)
 				r.afterReload();
-		log('reloaded (${pairs.length} classes, $moved statics, ${walker.objects} objects, '
+		log('reloaded (${[for (p in pairs) if (p.carry) p].length} classes, $moved statics, ${walker.objects} objects, '
 			+ '${Math.round((haxe.Timer.stamp() - start) * 1000)} ms)');
 	}
 

@@ -1,0 +1,5 @@
+# what run.py writes: the generated programs, their builds, and the logs
+gen/
+logs/
+__pycache__/
+*.tmp
