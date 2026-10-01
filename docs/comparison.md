@@ -138,9 +138,10 @@ formats the reason, the whole dependency chain, into a string before deciding wh
 print it, with a printer that's quadratic in the chain's depth: cubic in the depth, once
 per module on the chain. It takes a chain hundreds deep to notice: the same 1,000
 classes depending on the last one directly reload in 0.9 s. Reported as
-[haxe#13057](https://github.com/HaxeFoundation/haxe/issues/13057), with a fix in
-[#13058](https://github.com/HaxeFoundation/haxe/pull/13058); until it lands, it's a cost on
-every reload, tiny for ordinary programs.
+[haxe#13057](https://github.com/HaxeFoundation/haxe/issues/13057) and fixed by
+[#13058](https://github.com/HaxeFoundation/haxe/pull/13058), merged into `development`
+(Haxe 5) on 2026-10-01; 4.3.7 and earlier still have it, a cost on every reload that's
+tiny for ordinary programs.
 
 ## Speed of reloaded code
 
@@ -222,7 +223,7 @@ in `tests/tmigrate.nim`, and scenarios S3–S7 and S10–S11 rerun.
 | hotreload-nim | The default hot build (`-Og`) runs slower after the first reload | The speed loop B, before and after a reload: 170 → 258 ms | Build the library with the executable's flags; `-d:release` is unaffected |
 | hotreload-hx | A restarted program runs the code it was built with, not what's on disk, until the first edit | Edit `src/` while it's stopped, then start it: the old code runs | Swap in the startup warm-up build when the sources are newer than the executable |
 | hotreload-hx, JS | **Fixed.** From the second reload on, the main class kept running the first reload's code: each swap pointed the previous bundle's methods at the new code by copying them, so the first bundle, which the main class calls through, stayed pointed at the second | `tests/scale/run.py js --sizes 30`: the version line stops changing after the first reload | Each swap re-points the first bundle's classes at the new ones too |
-| Haxe | The compilation server takes cubic time in the depth of a dependency chain to skip the modules on it (above) | `tests/scale/run.py hx-all js --sizes 1000`, the "deep" edits | **Fixed in [#13058](https://github.com/HaxeFoundation/haxe/pull/13058)** (pending): format the skip reason only when it's printed, and in linear time |
+| Haxe | The compilation server takes cubic time in the depth of a dependency chain to skip the modules on it (above) | `tests/scale/run.py hx-all js --sizes 1000`, the "deep" edits | **Fixed in [#13058](https://github.com/HaxeFoundation/haxe/pull/13058)**, for Haxe 5: format the skip reason only when it's printed, and in linear time |
 | hotreload-hx | "Bad link", when new code needs native code the executable lacks, doesn't say why or that a restart fixes it | Call a new extern, or `sys.db.Sqlite`, in reloaded code | Catch it; name the class, and say to restart |
 
 Minor, in hotreload-nim: old `lib*_N.so` files and Nim cache files pile up in the build
