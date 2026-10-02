@@ -1,5 +1,5 @@
 # what every build of simple has: hotreload (haxelib dev hotreload-hx <this repo>, or
-# haxelib git), and wgrender-hx (haxelib dev wgrender-hx <its clone>), which compiles
+# haxelib git), and wgrender-hx (haxelib dev wgrender-hx <wgrender-c>/bindings/haxe), which compiles
 # wgrender in from its sources
 -cp src
 -lib hotreload-hx

@@ -109,10 +109,12 @@ Howdy, world! (ticks: 16, since the last reload: 1)
 `ticks` is a hot static, so it keeps counting through the reload. `sinceReload` is a
 plain static, so it starts over.
 
-`examples/simple` is the same thing with a window: [wgrender-hx](https://github.com/whirlinggizmo/wgrender-hx)'s
-simple example (an animated model, a sprite, music, text), with its scene, timers and
-loaded assets kept across reloads. It needs wgrender-hx installed and a link to its
-assets, which `src/Main.hx` explains; then `haxe hot.hxml`, and edit `src/Simple.hx`.
+`examples/simple` is the same thing with a window: the simple example of wgrender-hx,
+wgrender's Haxe binding (now in wgrender-c as
+[`bindings/haxe`](https://github.com/whirlinggizmo/wgrender-c/tree/main/bindings/haxe)),
+an animated model, a sprite, music and text, with its scene, timers and loaded assets kept
+across reloads. It needs that binding installed (`haxelib dev wgrender-hx
+<wgrender-c>/bindings/haxe`) and a link to its assets, which `src/Main.hx` explains; then `haxe hot.hxml`, and edit `src/Simple.hx`.
 Each example has a debug and a release build too, and `.vscode/` tasks and launch
 configurations for them.
 
@@ -389,9 +391,9 @@ A reloaded bundle runs as fast as the first, on the same JIT: in node, the bench
 reload, 0.58 s):
 
 ```bash
-cd examples/simple    # in wgrender-hx
+cd bindings/haxe/examples/simple    # in wgrender-c
 haxe -lib hotreload-hx --run hotreload.DevServer --reload-define wgr-host=none \
-  --mount /assets=../../project/lib/wgrender-c/examples/assets build.web.hxml -D wgr-host=full
+  --mount /assets=../../../../examples/assets build.web.hxml -D wgr-host=full
 ```
 
 The two wgrender-hx defines say what a hot build of a wgrender guest needs: a host that

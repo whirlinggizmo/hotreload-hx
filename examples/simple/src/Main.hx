@@ -1,5 +1,5 @@
 /**
-	hotreload's simple: wgrender's simple example (wgrender-hx's examples/simple-hxcpp),
+	hotreload's simple: wgrender's simple example (wgrender-c's bindings/haxe/examples/simple-hxcpp),
 	hot reloaded. This is the main class, never reloaded. wgrender owns the loop, so the
 	reloader is pumped from the frame callback, before Simple's frame; run it with
 	`haxe hot.hxml`, edit src/Simple.hx, save, and the next frame is the new code.
@@ -9,7 +9,7 @@
 	or from $WGR_ASSET_BASE. Once, from this directory:
 
 	```
-	ln -s "$(haxelib libpath wgrender-hx)project/lib/wgrender-c/examples/assets" assets
+	ln -s "$(haxelib libpath wgrender-hx)../../examples/assets" assets
 	```
 **/
 import wgr.*;
