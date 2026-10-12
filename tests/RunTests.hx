@@ -35,7 +35,7 @@ class RunTests {
 			var v1 = expect(~/^v1 ticks=(\d+) hp3,hp5 mood=Happy\(1\) label=7 cycle=true map=true isEnemy=true isMood=true$/);
 			var ticks = Std.parseInt(v1.matched(1));
 
-			step("a reload runs the new code, with the hot statics carried over");
+			step("a reload runs the new code, with the hot statics carried over, and new fields (a final too) from their initializers");
 			copyVersion("v2");
 			expect(~/^hotreload: building/);
 			expect(~/^before: v1$/);
@@ -43,13 +43,13 @@ class RunTests {
 			expect(~/^after: v2$/);
 			expect(~/^main: afterReload$/);
 			expect(~/^hotreload: reloaded/);
-			var v2 = expect(~/^v2 ticks=(\d+) hp3\/s10,hp5\/s10 mood=Happy\(1\) label=7 cycle=true map=true isEnemy=true isMood=true$/);
+			var v2 = expect(~/^v2 ticks=(\d+) hp3\/s10\/r2,hp5\/s10\/r2 mood=Happy\(1\) label=7 cycle=true map=true isEnemy=true isMood=true$/);
 			check(Std.parseInt(v2.matched(1)) > ticks, "ticks counts on through the reload");
 
 			step("a hot static whose type changed to another kind starts over");
 			edit("Game.hx", "@:hot static var label = 7;", "@:hot static var label = \"seven\";");
 			expect(~/^hotreload: Game.label's type changed \(Int to String\); started over/);
-			expect(~/^v2 ticks=\d+ hp3\/s10,hp5\/s10 mood=Happy\(1\) label=seven /);
+			expect(~/^v2 ticks=\d+ hp3\/s10\/r2,hp5\/s10\/r2 mood=Happy\(1\) label=seven /);
 
 			step("a @:hot function whose signature changed is refused, and the last code runs on");
 			edit("Game.hx", "public static function tick()", "public static function tick(n:Int = 1)");
@@ -66,7 +66,7 @@ class RunTests {
 			step("the next good build reloads");
 			edit("Game.hx", "static function describe() { oops", "static function describe() {");
 			edit("Game.hx", "'v2 ticks", "'v3 ticks");
-			expect(~/^v3 ticks=\d+ hp3\/s10,hp5\/s10 mood=Happy\(1\) label=seven cycle=true map=true isEnemy=true isMood=true$/);
+			expect(~/^v3 ticks=\d+ hp3\/s10\/r2,hp5\/s10\/r2 mood=Happy\(1\) label=seven cycle=true map=true isEnemy=true isMood=true$/);
 
 			step("a second save in the same second as the first is built too");
 			edit("Game.hx", "'v3 ticks", "'v4 ticks");

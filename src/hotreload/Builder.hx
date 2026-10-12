@@ -562,7 +562,9 @@ class Builder {
 			}
 			if (e != null) {
 				var name = f.name;
-				inits.push(macro if (!std.Reflect.hasField(this, $v{name})) this.$name = $e);
+				// a final field can't be assigned past its constructor, but can be set
+				var set = f.access.contains(AFinal) ? macro std.Reflect.setField(this, $v{name}, $e) : macro this.$name = $e;
+				inits.push(macro if (!std.Reflect.hasField(this, $v{name})) $set);
 			}
 		}
 		if (inits.length == 0)
@@ -592,7 +594,9 @@ class Builder {
 			}
 			if (e != null) {
 				var name = f.name;
-				inits.push(macro if (!copied.contains($v{name})) this.$name = $e);
+				// a final field can't be assigned past its constructor, but can be set
+				var set = f.access.contains(AFinal) ? macro std.Reflect.setField(this, $v{name}, $e) : macro this.$name = $e;
+				inits.push(macro if (!copied.contains($v{name})) $set);
 			}
 		}
 		if (inits.length == 0)
