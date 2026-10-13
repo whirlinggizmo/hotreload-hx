@@ -1,6 +1,13 @@
 package hotreload;
 
-#if (sys || eval)
+#if eval
+import eval.luv.Buffer;
+import eval.luv.Handle;
+import eval.luv.Loop;
+import eval.luv.SockAddr;
+import eval.luv.Stream;
+import eval.luv.Tcp;
+import eval.luv.Timer;
 import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.File;
@@ -57,7 +64,9 @@ class DevServer {
 	/** the served files' changes: each settled batch a version, its URLs (/__hotreload_assets) **/
 	/** cleared by a stop (/__hotreload_stop), which ends the watchers' loops and the serving one **/
 	static var running = true;
-	static var listener:Socket;
+
+	/** the long polls being held, each answered once it can be, or its time is up, or there's a stop **/
+	static var waiting = new Array<{ready:() -> Bool, end:Float, answer:() -> Void}>();
 
 	static var assetVersion = 0;
 	static var assetChanges = new Array<{version:Int, urls:Array<String>}>();
@@ -104,18 +113,28 @@ class DevServer {
 		root = Path.directory(config.js);
 		bundleUrl = "/" + Path.withoutDirectory(config.js);
 
-		// the port first: if it's taken there's nothing to serve, and saying so beats a page that never loads
-		var server = new Socket();
-		try {
-			server.bind(new Host("0.0.0.0"), port);
-			server.listen(32);
-		} catch (e) {
-			Sys.println('hotreload: can\'t serve on port $port ($e): is something else using it? --port <n> for another');
+		// the port first: if it's taken there's nothing to serve, and saying so beats a page that never loads.
+		// libuv's (eval.luv's): its bind reuses the address, so a restart needn't wait out the
+		// last run's closed connections, and it says when it fails (sys.net.Socket does neither on eval)
+		var loop = Loop.init().resolve();
+		var server = Tcp.init(loop).resolve();
+		var failure:String = null;
+		switch (server.bind(SockAddr.ipv4("0.0.0.0", port).resolve())) {
+			case Error(e): failure = e.toString();
+			case Ok(_):
+		}
+		// libuv tells a bind's address in use at the listen
+		if (failure == null)
+			Stream.listen(server, result -> switch (result) {
+				case Error(e): failure = e.toString();
+				case Ok(_): accept(loop, server);
+			}, 32);
+		if (failure != null) {
+			Sys.println('hotreload: can\'t serve on port $port ($failure): is something else using it? --port <n> for another');
 			Sys.exit(1);
 		}
 		var compilationServer = useServer ? startCompilationServer() : null;
-		listener = server;
-		Thread.create(() -> serve(server));
+		Thread.create(() -> serve(loop, server));
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
 		Sys.println('hotreload: serving http://localhost:$port/ ($root)');
 		for (url => dir in mounts)
@@ -328,93 +347,111 @@ class DevServer {
 
 	// --- serving ---
 
-	static function serve(server:Socket) {
-		while (running) {
-			// a stop closes the socket, which ends a waiting accept
-			var client = try server.accept() catch (_) break;
-			Thread.create(() -> {
-				try
-					respond(client)
-				catch (_) {}
-				try
-					client.close()
-				catch (_) {}
-			});
-		}
+	/** runs the loop: its connections, and a check of the held long polls a hundred times a second **/
+	static function serve(loop:Loop, server:Tcp) {
+		var check = Timer.init(loop).resolve();
+		check.start(() -> {
+			var now = haxe.Timer.stamp();
+			for (w in waiting.copy())
+				if (!running || now >= w.end || w.ready()) {
+					waiting.remove(w);
+					w.answer();
+				}
+			if (!running) {
+				check.stop();
+				Handle.close(check, () -> {});
+				Handle.close(server, () -> {});
+			}
+		}, 10, 10);
+		loop.run(DEFAULT);
 	}
 
-	static function respond(client:Socket) {
-		var request = client.input.readLine();
+	static function accept(loop:Loop, server:Tcp) {
+		var client = Tcp.init(loop).resolve();
+		if (!Stream.accept(server, client).isOk()) {
+			Handle.close(client, () -> {});
+			return;
+		}
+		// the request: its line and headers, up to the blank line (a GET has no body)
+		var head = new StringBuf();
+		Stream.readStart(client, result -> switch (result) {
+			case Ok(data):
+				head.add(data.toString());
+				var text = head.toString();
+				var end = text.indexOf("\r\n\r\n");
+				if (end >= 0) {
+					Stream.readStop(client);
+					try
+						respond(client, text.substr(0, end).split("\r\n"))
+					catch (_)
+						Handle.close(client, () -> {});
+				}
+			case Error(_):
+				Handle.close(client, () -> {});
+		});
+	}
+
+	static function respond(client:Tcp, lines:Array<String>) {
+		var request = lines[0];
 		var range:String = null;
-		while (true) {
-			var header = client.input.readLine();
-			if (header == "")
-				break;
+		for (header in lines.slice(1))
 			if (header.toLowerCase().startsWith("range:"))
 				range = header.substr(6).trim();
-		}
 		var parts = request.split(" ");
 		var path = StringTools.urlDecode(parts[1].split("?")[0]);
 		if (path == "/__hotreload") {
 			// ?since=<version>: held until there's a newer build (or a while passes), so a
 			// page hears of one as soon as it's built rather than at its next question
 			var since = Std.parseInt(parts[1].indexOf("since=") >= 0 ? parts[1].split("since=")[1].split("&")[0] : "");
-			if (since != null) {
-				var end = haxe.Timer.stamp() + 20;
-				while (haxe.Timer.stamp() < end) {
-					lock.acquire();
-					var newer = version > since;
-					lock.release();
-					if (newer)
-						break;
-					Sys.sleep(0.01);
-				}
-			}
-			lock.acquire();
-			var body = haxe.Json.stringify({version: version, url: bundleUrl, file: config.js, failed: failed});
-			lock.release();
-			send(client, 200, "application/json", haxe.io.Bytes.ofString(body));
+			hold(since == null ? null : () -> {
+				lock.acquire();
+				var newer = version > since;
+				lock.release();
+				newer;
+			}, () -> {
+				lock.acquire();
+				var body = haxe.Json.stringify({version: version, url: bundleUrl, file: config.js, failed: failed});
+				lock.release();
+				send(client, 200, "application/json", haxe.io.Bytes.ofString(body));
+			});
 			return;
 		}
 		if (path == "/__hotreload_stop") {
 			// from this machine only: a page elsewhere has no business stopping it
-			if (client.peer().host.toString() != "127.0.0.1") {
+			var peer = switch (client.getPeerName()) {
+				case Ok(addr): addr.toString();
+				case Error(_): "";
+			}
+			if (peer != "127.0.0.1") {
 				send(client, 403, "text/plain", haxe.io.Bytes.ofString("from 127.0.0.1 only"));
 				return;
 			}
-			send(client, 200, "text/plain", haxe.io.Bytes.ofString("stopping"));
-			running = false;
-			try
-				listener.close()
-			catch (_) {}
+			// once it's said: the watchers' loops end, and this one's check closes the server
+			send(client, 200, "text/plain", haxe.io.Bytes.ofString("stopping"), () -> running = false);
 			return;
 		}
 		if (path == "/__hotreload_assets") {
 			// ?since=<version>: held until files newer than it have changed (or a while
 			// passes); -1 answers at once with the current version, to start from
 			var since = Std.parseInt(parts[1].indexOf("since=") >= 0 ? parts[1].split("since=")[1].split("&")[0] : "");
-			if (since != null && since >= 0) {
-				var end = haxe.Timer.stamp() + 20;
-				while (haxe.Timer.stamp() < end) {
-					lock.acquire();
-					var newer = assetVersion > since;
-					lock.release();
-					if (newer)
-						break;
-					Sys.sleep(0.01);
-				}
-			}
-			lock.acquire();
-			var urls = new Array<String>();
-			if (since != null && since >= 0)
-				for (c in assetChanges)
-					if (c.version > since)
-						for (u in c.urls)
-							if (!urls.contains(u))
-								urls.push(u);
-			var body = haxe.Json.stringify({version: assetVersion, urls: urls});
-			lock.release();
-			send(client, 200, "application/json", haxe.io.Bytes.ofString(body));
+			hold(since == null || since < 0 ? null : () -> {
+				lock.acquire();
+				var newer = assetVersion > since;
+				lock.release();
+				newer;
+			}, () -> {
+				lock.acquire();
+				var urls = new Array<String>();
+				if (since != null && since >= 0)
+					for (c in assetChanges)
+						if (c.version > since)
+							for (u in c.urls)
+								if (!urls.contains(u))
+									urls.push(u);
+				var body = haxe.Json.stringify({version: assetVersion, urls: urls});
+				lock.release();
+				send(client, 200, "application/json", haxe.io.Bytes.ofString(body));
+			});
 			return;
 		}
 		var file = resolve(path);
@@ -436,6 +473,14 @@ class DevServer {
 		send(client, 200, mime(file), data);
 	}
 
+	/** a long poll's answer: at once without a condition, or held (by serve's check) until it's met, for up to 20 s **/
+	static function hold(ready:Null<() -> Bool>, answer:() -> Void) {
+		if (ready == null || ready())
+			answer();
+		else
+			waiting.push({ready: ready, end: haxe.Timer.stamp() + 20, answer: answer});
+	}
+
 	/** a request's file: under a mount, or the output directory, and never outside it **/
 	static function resolve(path:String):Null<String> {
 		var base = root;
@@ -453,16 +498,21 @@ class DevServer {
 		return FileSystem.exists(file) ? file : null;
 	}
 
-	static function send(client:Socket, status:Int, type:String, body:haxe.io.Bytes, ?extra = "") {
+	/** a response, and then the connection closed (and `sent` called) once it's written **/
+	static function send(client:Tcp, status:Int, type:String, body:haxe.io.Bytes, ?extra = "", ?sent:() -> Void) {
 		var reason = switch (status) {
 			case 200: "OK";
 			case 206: "Partial Content";
+			case 403: "Forbidden";
 			default: "Not Found";
 		}
-		client.output.writeString('HTTP/1.1 $status $reason\r\nContent-Type: $type\r\nContent-Length: ${body.length}\r\n'
-			+ 'Accept-Ranges: bytes\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n${extra}Connection: close\r\n\r\n');
-		client.output.write(body);
-		client.output.flush();
+		var head = 'HTTP/1.1 $status $reason\r\nContent-Type: $type\r\nContent-Length: ${body.length}\r\n'
+			+ 'Accept-Ranges: bytes\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n${extra}Connection: close\r\n\r\n';
+		Stream.write(client, [Buffer.fromString(head), Buffer.fromBytes(body)], (_, _) -> {
+			Handle.close(client, () -> {});
+			if (sent != null)
+				sent();
+		});
 	}
 
 	static function mime(file:String):String {
