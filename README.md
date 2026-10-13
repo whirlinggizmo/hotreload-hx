@@ -365,6 +365,11 @@ The build's own arguments (an hxml) follow the options: the dev server adds
 an engine streaming its assets uses. A node program asks the dev server at
 `HOTRELOAD_URL` (`http://localhost:8080/__hotreload` by default).
 
+A hot JS build is ES6 output (`-D js-es=6`), since a reload's swap fails on ES5 output.
+`-lib hotreload-hx` sets it (its `extraParams.hxml`), so any build using the library is ES6
+unless told otherwise; a hot build set lower stops with a message. A define given before
+`-lib hotreload-hx` is overridden by it, so ask for more than ES6 after it.
+
 Nothing to call and nothing to mark: every class reloads, the main class too, and so
 `@:hot` means nothing here (hxcpp code that uses it builds as it is). What a reload does:
 

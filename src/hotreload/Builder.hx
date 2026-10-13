@@ -146,6 +146,12 @@ class Builder {
 	}
 
 	static function initJs() {
+		// a reload's swap fails on ES5 output ("newHooks.runAfter is not a function"). js-es
+		// can't be set from here: the compiler has read it already (an ES5 constructor's
+		// `this` before `super()` would stay), so it's set on the command line, by the library's extraParams.hxml
+		var es = Context.definedValue("js-es");
+		if (es == null || Std.parseInt(es) == null || Std.parseInt(es) < 6)
+			Context.fatalError("hotreload: a hot JS build needs -D js-es=6 (-lib hotreload-hx sets it; something set it lower)", Context.currentPos());
 		var args = Sys.args();
 		var js = null;
 		var i = 0;

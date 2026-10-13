@@ -1,1 +1,3 @@
 --macro hotreload.Builder.init()
+# a hot JS build needs ES6 output: a reload's swap fails on ES5 (Builder stops a hot build without it)
+-D js-es=6
