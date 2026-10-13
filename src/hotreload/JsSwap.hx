@@ -50,6 +50,7 @@ class JsSwap {
 		if (bundles.length > 1)
 			return true;
 		Syntax.code("setTimeout({0}, 0)", poll);
+		Syntax.code("setTimeout({0}, 0)", pollAssets);
 		return false;
 	}
 
@@ -113,6 +114,31 @@ class JsSwap {
 				busy = false;
 				Syntax.code("setTimeout({0}, 1000)", ask);
 			});
+		}
+		ask();
+	}
+
+	/**
+		Asks the DevServer which served files changed (a long poll of its own, so an asset
+		never loads a bundle) and tells the reloaders. The first answer is only where to
+		start from: what changed before the program started, it loaded already
+	**/
+	static function pollAssets() {
+		var known = -1;
+		function ask() {
+			Syntax.code("fetch({0} + '_assets?since=' + {1}, {cache: 'no-store'}).then(r => r.json())", statusUrl(), known).then((info:Dynamic) -> {
+				var urls:Array<String> = info.urls;
+				var first = known < 0;
+				known = info.version;
+				if (!first && urls.length > 0)
+					for (r in reloaders)
+						if (r.assetsChanged != null)
+							try
+								r.assetsChanged(urls)
+							catch (e:Dynamic)
+								log('assetsChanged failed: $e');
+				Syntax.code("setTimeout({0}, 0)", ask);
+			}, (_:Dynamic) -> Syntax.code("setTimeout({0}, 1000)", ask));
 		}
 		ask();
 	}

@@ -33,7 +33,8 @@ using StringTools;
 
 	It serves the build's output directory at `/`, with Range requests (an engine may
 	stream assets), and `/__hotreload`, which says what the latest build is (with `?since=<n>`, once there's
-	one newer than n). Ten times a
+	one newer than n). `/__hotreload_assets` says which served files changed (with `?since=<n>`, the
+	same way), and `/__hotreload_stop`, asked from this machine, stops it. Ten times a
 	second it checks the sources in the main class's directory, and below, for changes;
 	once they've stopped changing, it rebuilds, through a compilation server it starts,
 	and the page, which is waiting to hear of it, loads it. Compiler errors go to this
@@ -52,6 +53,14 @@ class DevServer {
 	static var version = 0;
 	static var failed = false;
 	static var lock = new Mutex();
+
+	/** the served files' changes: each settled batch a version, its URLs (/__hotreload_assets) **/
+	/** cleared by a stop (/__hotreload_stop), which ends the watchers' loops and the serving one **/
+	static var running = true;
+	static var listener:Socket;
+
+	static var assetVersion = 0;
+	static var assetChanges = new Array<{version:Int, urls:Array<String>}>();
 
 	static function main() {
 		var args = Sys.args();
@@ -105,13 +114,18 @@ class DevServer {
 			Sys.exit(1);
 		}
 		var compilationServer = useServer ? startCompilationServer() : null;
+		listener = server;
 		Thread.create(() -> serve(server));
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
 		Sys.println('hotreload: serving http://localhost:$port/ ($root)');
 		for (url => dir in mounts)
 			Sys.println('hotreload: and $dir at $url/');
 		Sys.println('hotreload: watching ${dirs.join(", ")}');
+		Thread.create(watchAssets);
 		watch(compilationServer);
+		// the compilation server's shell sees this process go, and stops it
+		Sys.println("hotreload: stopped");
+		Sys.exit(0);
 	}
 
 	// --- building ---
@@ -120,7 +134,7 @@ class DevServer {
 		var stamps = sources();
 		var changed = [];
 		var settling = false;
-		while (true) {
+		while (running) {
 			Sys.sleep(CHECK_INTERVAL);
 			var current = sources();
 			var paths = [];
@@ -149,6 +163,77 @@ class DevServer {
 				changed = [];
 			}
 		}
+	}
+
+	/**
+		The served files (the output directory's and the mounts'), but the bundle: a saved
+		one, once its save has settled, is told to the page by its URL, which loads it again
+		in place. Nothing is built
+	**/
+	static function watchAssets() {
+		var stamps = served();
+		var changed = new Map<String, Bool>();
+		var settling = false;
+		while (running) {
+			Sys.sleep(CHECK_INTERVAL);
+			var current = served();
+			var any = false;
+			for (url => stamp in current)
+				if (!stamps.exists(url) || stamps.get(url).stamp != stamp.stamp) {
+					changed.set(url, true);
+					any = true;
+				}
+			for (url in stamps.keys())
+				if (!current.exists(url)) {
+					changed.set(url, true);
+					any = true;
+				}
+			stamps = current;
+			if (any) {
+				settling = true;
+			} else if (settling) {
+				// an empty file is one being saved (truncated, then written): wait for it
+				var empty = false;
+				for (url in changed.keys())
+					if (current.exists(url) && current.get(url).size == 0)
+						empty = true;
+				if (empty)
+					continue;
+				settling = false;
+				var urls = [for (url in changed.keys()) url];
+				urls.sort(Reflect.compare);
+				changed.clear();
+				lock.acquire();
+				assetVersion++;
+				assetChanges.push({version: assetVersion, urls: urls});
+				lock.release();
+				Sys.println('hotreload: ${urls.join(", ")} changed; the page loads it next');
+			}
+		}
+	}
+
+	/** every served file by its URL, and a stamp: its time and size (a file isn't read: an asset can be large) **/
+	static function served():Map<String, {stamp:String, size:Int}> {
+		var result = new Map<String, {stamp:String, size:Int}>();
+		var bundle = Path.normalize(FileSystem.absolutePath(config.js));
+		function walk(dir:String, url:String) {
+			for (entry in (try FileSystem.readDirectory(dir) catch (_) [])) {
+				if (entry.startsWith("."))
+					continue;
+				var path = dir + "/" + entry;
+				if (FileSystem.isDirectory(path))
+					walk(path, url + "/" + entry);
+				else if (Path.normalize(FileSystem.absolutePath(path)) != bundle && !entry.endsWith(".map"))
+					try {
+						var stat = FileSystem.stat(path);
+						result.set(url + "/" + entry, {stamp: stat.mtime.getTime() + ":" + stat.size, size: stat.size});
+					} catch (_) {}
+			}
+		}
+		walk(root, "");
+		for (url => dir in mounts)
+			walk(dir, url);
+		return result;
 	}
 
 	static function rebuild(changed:Array<String>, compilationServer:String) {
@@ -244,8 +329,9 @@ class DevServer {
 	// --- serving ---
 
 	static function serve(server:Socket) {
-		while (true) {
-			var client = server.accept();
+		while (running) {
+			// a stop closes the socket, which ends a waiting accept
+			var client = try server.accept() catch (_) break;
 			Thread.create(() -> {
 				try
 					respond(client)
@@ -286,6 +372,47 @@ class DevServer {
 			}
 			lock.acquire();
 			var body = haxe.Json.stringify({version: version, url: bundleUrl, file: config.js, failed: failed});
+			lock.release();
+			send(client, 200, "application/json", haxe.io.Bytes.ofString(body));
+			return;
+		}
+		if (path == "/__hotreload_stop") {
+			// from this machine only: a page elsewhere has no business stopping it
+			if (client.peer().host.toString() != "127.0.0.1") {
+				send(client, 403, "text/plain", haxe.io.Bytes.ofString("from 127.0.0.1 only"));
+				return;
+			}
+			send(client, 200, "text/plain", haxe.io.Bytes.ofString("stopping"));
+			running = false;
+			try
+				listener.close()
+			catch (_) {}
+			return;
+		}
+		if (path == "/__hotreload_assets") {
+			// ?since=<version>: held until files newer than it have changed (or a while
+			// passes); -1 answers at once with the current version, to start from
+			var since = Std.parseInt(parts[1].indexOf("since=") >= 0 ? parts[1].split("since=")[1].split("&")[0] : "");
+			if (since != null && since >= 0) {
+				var end = haxe.Timer.stamp() + 20;
+				while (haxe.Timer.stamp() < end) {
+					lock.acquire();
+					var newer = assetVersion > since;
+					lock.release();
+					if (newer)
+						break;
+					Sys.sleep(0.01);
+				}
+			}
+			lock.acquire();
+			var urls = new Array<String>();
+			if (since != null && since >= 0)
+				for (c in assetChanges)
+					if (c.version > since)
+						for (u in c.urls)
+							if (!urls.contains(u))
+								urls.push(u);
+			var body = haxe.Json.stringify({version: assetVersion, urls: urls});
 			lock.release();
 			send(client, 200, "application/json", haxe.io.Bytes.ofString(body));
 			return;

@@ -384,6 +384,20 @@ Nothing to call and nothing to mark: every class reloads, the main class too, an
 - the hooks run as on hxcpp: `@:beforeHotReload` on the old code, `@:afterHotReload` on
   the new.
 
+Saved assets are told to the page too, by URL. The dev server watches the files it serves
+(its output directory and its mounts, but the bundle), and once a save has settled it
+answers `/__hotreload_assets` (a long poll of its own, so an asset never loads a bundle).
+Nothing is rebuilt: the program says what to load again, and how, in a reloader's
+`assetsChanged`:
+
+```haxe
+var reloader = new hotreload.Reloader();
+reloader.assetsChanged = urls -> for (url in urls) assets.reload(url); // a program's own
+```
+
+`/__hotreload_stop`, asked from the same machine, stops the dev server, and with it its
+compilation server: a tool that started one can end it cleanly.
+
 A signature change needs no restart, since every caller reloads with it. What keeps the
 code it came from: a closure, or a bound method (`obj.method` as a value), made before the
 reload. Each old bundle's code is freed once nothing refers to it, but the first's, which

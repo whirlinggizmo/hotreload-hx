@@ -19,6 +19,13 @@ class Reloader {
 	/** the main class's: just after, after the new code's `@:afterHotReload` hooks **/
 	public var afterReload:() -> Void;
 
+	/**
+		The main class's: served files that changed, by URL (`/assets/sounds/fire.ogg`),
+		once their saves have settled. The DevServer watches its output directory and its
+		mounts; nothing is rebuilt, and what to load again, and how, is the program's
+	**/
+	public var assetsChanged:(urls:Array<String>) -> Void;
+
 	public function new() {
 		#if hotreload
 		JsSwap.reloaders.push(this);
