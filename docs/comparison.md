@@ -78,7 +78,7 @@ saved as editors save them: a temporary file, then a rename. The test programs a
 
 | Program | What it measured |
 | --- | --- |
-| wgrender's `simple` example (`examples/simple` in each repo), a window at 60 fps | save-to-reload time, build size and time |
+| wgrender's `simple` example (`examples/simple` in each repo then; hotreload-hx's was removed on 2026-10-16, so that its examples need nothing else), a window at 60 fps | save-to-reload time, build size and time |
 | A console test program per library | what each can and can't do (S1–S18) |
 | A timed loop in a hot function | the speed of reloaded code |
 
@@ -237,4 +237,4 @@ directory, and a refused library still uses up its version number.
 | Per-frame work at scale: physics, per-entity updates, tight loops | hotreload-nim | Reloaded code runs natively, the same as the shipped build in a release hot build |
 | Engine-side, or calling C functions the executable doesn't already use | hotreload-nim | Reloaded Haxe code can only reach native code the executable already compiled |
 | Something you want to step through in a debugger while editing it | hotreload-hx | Its breakpoints survive a reload; Nim's go stale |
-| Game code that can run as a web guest (wgrender-hx's JS target) | hotreload-hx, JS | The fastest reloads, reloaded code at full speed, the most kinds of change, and nothing to mark |
+| Game code that can run in a browser (a JS build, as HeliX's browser target is) | hotreload-hx, JS | The fastest reloads, reloaded code at full speed, the most kinds of change, and nothing to mark |

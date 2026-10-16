@@ -109,14 +109,11 @@ Howdy, world! (ticks: 16, since the last reload: 1)
 `ticks` is a hot static, so it keeps counting through the reload. `sinceReload` is a
 plain static, so it starts over.
 
-`examples/simple` is the same thing with a window: the simple example of wgrender-hx,
-wgrender's Haxe binding (now in wgrender-c as
-[`bindings/haxe`](https://github.com/whirlinggizmo/wgrender-c/tree/main/bindings/haxe)),
-an animated model, a sprite, music and text, with its scene, timers and loaded assets kept
-across reloads. It needs that binding installed (`haxelib dev wgrender-hx
-<wgrender-c>/bindings/haxe`) and a link to its assets, which `src/Main.hx` explains; then `haxe hot.hxml`, and edit `src/Simple.hx`.
-Each example has a debug and a release build too, and `.vscode/` tasks and launch
-configurations for them.
+It has a debug and a release build too, and `.vscode/` tasks and launch configurations
+for them, and needs nothing but hotreload-hx. For a whole program built with it,
+[HeliX](https://github.com/whirlinggizmo/helix), a Haxe game framework, develops through
+the dev server: its browser examples reload their code, and their assets in place, as
+they're saved.
 
 ## Usage
 
@@ -276,8 +273,8 @@ abstract's `this`). A library needs two things for it to work:
   	return Raw.wgr_model_set_position(m, x, y, z);
   ```
 
-`examples/simple` is wgrender-hx, which is all inline wrappers over externs, reloading
-at full speed through this.
+wgrender's Haxe binding was written this way, all inline wrappers over externs, and
+reloaded at full speed.
 
 ### The compilation server
 
@@ -317,7 +314,7 @@ A git hxcpp builds its own build tool on first use; if it doesn't, run `haxe com
 in its `tools/hxcpp/`. To work on the forks themselves, clone them and use `haxelib dev`
 instead (`haxelib dev hxcpp-debug-server <the clone>/hxcpp-debug-server`).
 
-A hot build to debug has `-debug` and `-lib hxcpp-debug-server`, as the examples' `build
+A hot build to debug has `-debug` and `-lib hxcpp-debug-server`, as `examples/hello`'s `build
 hot` tasks and `Hot (hxcpp)` launch configurations do. In a `-debug` build the modules run
 interpreted, not through cppia's JIT, since breakpoints only fire there. As such it's the
 slowest way to run reloaded code. The extension talks to the program on port 6972, so a
@@ -405,21 +402,14 @@ keeps the connection to the dev server.
 
 A reloaded bundle runs as fast as the first, on the same JIT: in node, the benchmark
 `tests/matrix` runs (a math loop and an object loop) took 28 ms and 8 ms before a reload,
-30–37 ms and 7–9 ms after. wgrender-hx's `simple` example, as a guest in a page, reloaded
+30–37 ms and 7–9 ms after. wgrender's `simple` example, as a guest in a page, reloaded
 0.23–0.25 s after a save (a build takes 44–50 ms through the compilation server; the first
-reload, 0.58 s):
+reload, 0.58 s).
 
-```bash
-cd bindings/haxe/examples/simple    # in wgrender-c
-haxe -lib hotreload-hx --run hotreload.DevServer --reload-define wgr-host=none \
-  --mount /assets=../../../../examples/assets build.web.hxml -D wgr-host=full
-```
-
-The two wgrender-hx defines say what a hot build of a wgrender guest needs: a host that
-exports all of wgrender (`-D wgr-host=full`), since reloaded code may call what the first
-build didn't, and no host at all for a reload's build (`--reload-define wgr-host=none`,
-the define for the reload's builds only), since the page has it loaded already. A reload's
-build has the first build's arguments, then its own, and the later define wins.
+`--reload-define <name[=value]>` gives the reloads' builds a define the first build
+doesn't get: for something the page loads once, which the first build makes and a
+reload's needn't (a native host a guest runs in, say). A reload's build has the first
+build's arguments, then its own, and the later define wins.
 
 ## Limits
 
@@ -439,7 +429,7 @@ build has the first build's arguments, then its own, and the later define wins.
 - A program started again runs the code it was built with, not what's in the sources now,
   until the next change reloads. Rebuild after editing a stopped program.
 - Old modules aren't freed: old code may still run. Memory grows with each reload, about
-  1.25 MB in `examples/simple` (a `-debug` build). A restart gives it back.
+  1.25 MB in wgrender's `simple` example (a `-debug` build). A restart gives it back.
 - A change to the main class, or to a `@:hot` function's signature, requires a restart.
 - A class in the reloaded code with its own `@:native` can't be reloaded.
 
@@ -468,8 +458,6 @@ tests/matrix/            the capability matrix behind docs/comparison.md, for hx
 tests/scale/             reload time by program size, behind docs/comparison.md, for hxcpp, JS and Nim
 examples/hello/          a console application: src/Main.hx, its main class, and
                          src/Hello.hx, which is reloaded
-examples/simple/         wgrender-hx's simple example, hot reloaded: a window, a scene,
-                         assets, a native binding
 ```
 
 ## License

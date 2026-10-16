@@ -34,8 +34,8 @@ using StringTools;
 	- `--port <n>`: where it serves, 8080 by default
 	- `--mount <url>=<dir>`: serves a directory at a path too, as `--mount /assets=../assets`
 	- `--reload-define <name[=value]>`: a define for the reload's builds only, not the first:
-	  for a library whose build step the page needs only once (wgrender-hx's host:
-	  `--reload-define wgr-host=none`)
+	  for something the page loads once, which the first build makes and a reload's needn't
+	  (a native host a guest runs in, say)
 	- `--no-compilation-server`: builds each reload with a `haxe` of its own
 
 	It serves the build's output directory at `/`, with Range requests (an engine may
