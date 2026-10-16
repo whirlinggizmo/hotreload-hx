@@ -29,5 +29,8 @@ new code's line ("save → running"), and from the reloader's `hotreload: buildi
 line ("build + swap"). Save → running includes the reloader's wait for the change to
 settle: a check every 0.25 s, then one quiet one.
 
-The programs go to `gen/`, the logs and a table of the results to `logs/` (`scale.md`).
-The numbers are read by hand; nothing here passes or fails on its own.
+The programs are generated in `gen/`, and each is deleted once it's measured, since a
+program and its build run to gigabytes at 3000 classes; `gen/` itself goes when the run
+ends, even a failed or stopped one. `--keep` keeps them, to look into one, until the next
+run without it. `gen/` is ignored by git. The logs and a table of the results go to
+`logs/` (`scale.md`). The numbers are read by hand; nothing here passes or fails on its own.

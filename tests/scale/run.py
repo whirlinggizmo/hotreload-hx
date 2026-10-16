@@ -7,6 +7,10 @@ hand; nothing here passes or fails on its own.
     python3 tests/scale/run.py                       every kind, at 100, 1000 and 3000
     python3 tests/scale/run.py hx-all hx-small --sizes 100,1000
     python3 tests/scale/run.py nim --nim ../hotreload-nim
+    python3 tests/scale/run.py hx-all --sizes 100 --keep    keeps gen/ to look into
+
+Each program is generated in gen/ and deleted once it's measured (they and their builds
+run to gigabytes), and gen/ goes at the end of a run, but with --keep.
 
 The kinds:
     hx-all    hxcpp, every class in the reloaded code (src/game/)
@@ -360,6 +364,15 @@ def measure(kind, n, args):
         root, game, deep = gen_nim(n, args.nim)
     else:
         root, game, deep = gen_hx(kind, n)
+    try:
+        return run(kind, n, args, tag, root, game, deep)
+    finally:
+        # a program and its build run to gigabytes at 3000 classes: none is kept, but with --keep
+        if not args.keep:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+def run(kind, n, args, tag, root, game, deep):
     print(f"   building")
     blog = os.path.join(LOGS, f"{tag}-build.log")
     server = None
@@ -443,13 +456,20 @@ if __name__ == "__main__":
     ap.add_argument("--nim", default=os.path.join(HERE, "..", "..", "..", "hotreload-nim"),
                     help="a checkout of hotreload-nim")
     ap.add_argument("--timeout", type=float, default=900)
+    ap.add_argument("--keep", action="store_true",
+                    help="keep the generated programs and their builds in gen/, to look into one")
     args = ap.parse_args()
     args.nim = os.path.abspath(args.nim)
     os.makedirs(LOGS, exist_ok=True)
     results = []
-    for n in [int(s) for s in args.sizes.split(",")]:
-        for kind in args.kinds:
-            results.append(measure(kind, n, args))
+    try:
+        for n in [int(s) for s in args.sizes.split(",")]:
+            for kind in args.kinds:
+                results.append(measure(kind, n, args))
+    finally:
+        # what's left in gen/, a stopped run's or a --keep run's, goes too
+        if not args.keep:
+            shutil.rmtree(GEN, ignore_errors=True)
     out = table(results)
     print("\n" + out)
     save(os.path.join(LOGS, "scale.md"), out + "\n")
