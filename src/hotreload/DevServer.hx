@@ -150,37 +150,13 @@ class DevServer {
 	// --- building ---
 
 	static function watch(compilationServer:String) {
-		var stamps = sources();
-		var changed = [];
-		var settling = false;
+		var sourceWatch = new FileWatch(sources);
 		while (running) {
 			Sys.sleep(CHECK_INTERVAL);
-			var current = sources();
-			var paths = [];
-			for (path => stamp in current)
-				if (!stamps.exists(path) || stamps.get(path) != stamp)
-					paths.push(path);
-			for (path in stamps.keys())
-				if (!current.exists(path))
-					paths.push(path);
-			if (paths.length > 0) {
-				for (p in paths)
-					if (!changed.contains(p))
-						changed.push(p);
-				stamps = current;
-				settling = true;
-			} else if (settling) {
-				// an empty source is one being saved (truncated, then written): wait for it
-				var empty = false;
-				for (path => _ in current)
-					if (FileSystem.stat(path).size == 0)
-						empty = true;
-				if (empty)
-					continue;
-				settling = false;
-				rebuild(changed, compilationServer);
-				changed = [];
-			}
+			// a build starts once the sources have stopped changing (FileWatch)
+			var paths = sourceWatch.check();
+			if (paths != null)
+				rebuild(paths, compilationServer);
 		}
 	}
 
@@ -190,50 +166,23 @@ class DevServer {
 		in place. Nothing is built
 	**/
 	static function watchAssets() {
-		var stamps = served();
-		var changed = new Map<String, Bool>();
-		var settling = false;
+		var assetWatch = new FileWatch(served);
 		while (running) {
 			Sys.sleep(CHECK_INTERVAL);
-			var current = served();
-			var any = false;
-			for (url => stamp in current)
-				if (!stamps.exists(url) || stamps.get(url).stamp != stamp.stamp) {
-					changed.set(url, true);
-					any = true;
-				}
-			for (url in stamps.keys())
-				if (!current.exists(url)) {
-					changed.set(url, true);
-					any = true;
-				}
-			stamps = current;
-			if (any) {
-				settling = true;
-			} else if (settling) {
-				// an empty file is one being saved (truncated, then written): wait for it
-				var empty = false;
-				for (url in changed.keys())
-					if (current.exists(url) && current.get(url).size == 0)
-						empty = true;
-				if (empty)
-					continue;
-				settling = false;
-				var urls = [for (url in changed.keys()) url];
-				urls.sort(Reflect.compare);
-				changed.clear();
-				lock.acquire();
-				assetVersion++;
-				assetChanges.push({version: assetVersion, urls: urls});
-				lock.release();
-				Sys.println('hotreload: ${urls.join(", ")} changed; the page loads it next');
-			}
+			var urls = assetWatch.check();
+			if (urls == null)
+				continue;
+			lock.acquire();
+			assetVersion++;
+			assetChanges.push({version: assetVersion, urls: urls});
+			lock.release();
+			Sys.println('hotreload: ${urls.join(", ")} changed; the page loads it next');
 		}
 	}
 
-	/** every served file by its URL, and a stamp: its time and size (a file isn't read: an asset can be large) **/
-	static function served():Map<String, {stamp:String, size:Int}> {
-		var result = new Map<String, {stamp:String, size:Int}>();
+	/** every served file, by its URL, and its path **/
+	static function served():Map<String, String> {
+		var result = new Map<String, String>();
 		var bundle = Path.normalize(FileSystem.absolutePath(config.js));
 		function walk(dir:String, url:String) {
 			for (entry in (try FileSystem.readDirectory(dir) catch (_) [])) {
@@ -243,10 +192,7 @@ class DevServer {
 				if (FileSystem.isDirectory(path))
 					walk(path, url + "/" + entry);
 				else if (Path.normalize(FileSystem.absolutePath(path)) != bundle && !entry.endsWith(".map"))
-					try {
-						var stat = FileSystem.stat(path);
-						result.set(url + "/" + entry, {stamp: stat.mtime.getTime() + ":" + stat.size, size: stat.size});
-					} catch (_) {}
+					result.set(url + "/" + entry, path);
 			}
 		}
 		walk(root, "");
@@ -293,7 +239,7 @@ class DevServer {
 		File.saveContent(config.js, 'globalThis.__hotreload_built = $n; ' + js);
 	}
 
-	/** the .hx files in the watched directories and below, and a stamp for each: its time, size and contents' hash **/
+	/** the .hx files in the watched directories and below **/
 	static function sources():Map<String, String> {
 		var result = new Map<String, String>();
 		function walk(dir:String) {
@@ -302,10 +248,7 @@ class DevServer {
 				if (FileSystem.isDirectory(path))
 					walk(path);
 				else if (entry.endsWith(".hx"))
-					try {
-						var stat = FileSystem.stat(path);
-						result.set(path, stat.mtime.getTime() + ":" + stat.size + ":" + haxe.crypto.Crc32.make(File.getBytes(path)));
-					} catch (_) {}
+					result.set(path, path);
 			}
 		}
 		for (d in config.dirs)

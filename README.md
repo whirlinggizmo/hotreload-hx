@@ -109,6 +109,15 @@ Howdy, world! (ticks: 16, since the last reload: 1)
 `ticks` is a hot static, so it keeps counting through the reload. `sinceReload` is a
 plain static, so it starts over.
 
+The greeting's first word is an asset, `assets/greeting.txt`. Change it and save, and the
+next greeting uses it, with nothing rebuilt:
+
+```
+hotreload: assets/greeting.txt changed
+hello: the greeting is now "Howdy"
+Howdy, world! (ticks: 20, since the last reload: 5)
+```
+
 It has a debug and a release build too, and `.vscode/` tasks and launch configurations
 for them, and needs nothing but hotreload-hx. For a whole program built with it,
 [HeliX](https://github.com/whirlinggizmo/helix), a Haxe game framework, develops through
@@ -218,6 +227,27 @@ A replaced module stays loaded, so a callback that its code handed out before a 
 (to an asset loader, say) still works when it fires. Note that it runs the code it came
 from, not the new code. It reads and writes the same hot statics as the new code, since
 each hot static has one storage the executable keeps.
+
+### Assets
+
+A saved asset can be told to the program too, so that it loads it again without a
+restart. The reloader watches the directories it's given, and once a save has settled,
+gives `assetsChanged` the paths that changed, each as the program loads it: the
+directory as it was given, then the rest (`assets/sounds/fire.ogg`):
+
+```haxe
+reloader.watchAssets("assets");
+reloader.assetsChanged = paths -> Game.onAssetsChanged(paths); // through the class: the new code
+```
+
+Nothing is rebuilt: what to load again, and how, is the program's. A deleted file is told
+too. Hidden files (an editor's `.swp`) aren't watched, and the temporary file an editor
+saves through, made and gone within the save, isn't told. Like a swap, it happens in
+`update`, never in the middle of a frame. The callback is the main class's, so call a
+reloaded class through the class, as above, for it to reach the new code after a reload; a
+function kept from before a reload runs the code it came from. On JS the same callback
+gets URLs, from the dev server, and `watchAssets` does nothing: see
+[JavaScript](#javascript).
 
 ### Building
 
@@ -385,10 +415,13 @@ Saved assets are told to the page too, by URL. The dev server watches the files 
 (its output directory and its mounts, but the bundle), and once a save has settled it
 answers `/__hotreload_assets` (a long poll of its own, so an asset never loads a bundle).
 Nothing is rebuilt: the program says what to load again, and how, in a reloader's
-`assetsChanged`:
+`assetsChanged`, as on hxcpp ([Assets](#assets)), but by URL. `watchAssets` does nothing
+here, since the dev server watches everything it serves, so that one main class builds
+for both:
 
 ```haxe
 var reloader = new hotreload.Reloader();
+reloader.watchAssets("assets"); // hxcpp's; on JS, what the dev server serves (--mount)
 reloader.assetsChanged = urls -> for (url in urls) assets.reload(url); // a program's own
 ```
 
@@ -444,7 +477,9 @@ extraParams.hxml         --macro hotreload.Builder.init(), which -lib hotreload-
 src/hotreload/
   Builder.hx             the hot build: @:hot, the reload hooks, and the executable's
                          config for rebuilding the reloaded code
-  Reloader.hx            the reloader: watch, rebuild, swap
+  Reloader.hx            the reloader: watch, rebuild, swap, and tell of saved assets
+  FileWatch.hx           files watched for saves, told once a save has settled (the
+                         reloader's sources and assets, and the dev server's)
   Slot.hx, Slots.hx      hot statics' storage, which the executable keeps
   Hooks.hx               the reload hooks, and the executable's @:hot functions
   Migrate.hx             carrying the hot statics' objects over to the new classes
@@ -456,8 +491,9 @@ tests/                   `haxe tests/run.hxml`: a smoke test that builds tests/r
                          hot, runs it and edits it while it runs
 tests/matrix/            the capability matrix behind docs/comparison.md, for hxcpp and JS
 tests/scale/             reload time by program size, behind docs/comparison.md, for hxcpp, JS and Nim
-examples/hello/          a console application: src/Main.hx, its main class, and
-                         src/Hello.hx, which is reloaded
+examples/hello/          a console application: src/Main.hx, its main class,
+                         src/Hello.hx, which is reloaded, and assets/greeting.txt, an
+                         asset it reads again when it's saved
 ```
 
 ## License

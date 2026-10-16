@@ -162,11 +162,18 @@ def js():
         line = "\n\t\tSys.println('S18=' + haxe.Json.parse('{\"a\":[1,2]}').a[1]);"
         edit(game, "static function report() {", "static function report() {" + line)
         p.wait(r"^S18=")
+
+        step("an asset the DevServer serves, saved: told to assetsChanged by its URL, once")
+        save(os.path.join(HERE, "out", "js", "note.txt"), "one")
+        p.wait(r"^main: assetsChanged /note\.txt$")
     finally:
         if p:
             p.stop()
         server.stop()
         fresh_sources()
+        note = os.path.join(HERE, "out", "js", "note.txt")
+        if os.path.exists(note):
+            os.remove(note)
 
 
 if __name__ == "__main__":

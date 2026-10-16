@@ -11,12 +11,15 @@ using StringTools;
 **/
 class RunTests {
 	static var dir:String;
+	static var assets:String;
 	static var output:Output;
 	static var failures = 0;
 
 	static function main() {
 		dir = Path.normalize(Path.join([Sys.getCwd(), "tests/reload"]));
+		assets = '$dir/assets';
 		copyVersion("v1");
+		clearAssets();
 
 		step("build the program hot");
 		if (Sys.command("haxe", ["--cwd", dir, "build.hxml"]) != 0)
@@ -26,7 +29,7 @@ class RunTests {
 		// a pipe would hold up this one (the interpreter's threads take turns)
 		var log = '$dir/out/hot/run.log';
 		File.saveContent(log, "");
-		var program = new Process("sh", ["-c", 'exec "$$0" > "$$1" 2>&1', '$dir/out/hot/Main-debug', log]);
+		var program = new Process("sh", ["-c", 'HOTRELOAD_TEST_ASSETS="$$2" exec "$$0" > "$$1" 2>&1', '$dir/out/hot/Main-debug', log, assets]);
 		output = new Output(log);
 
 		try {
@@ -73,6 +76,21 @@ class RunTests {
 			expect(~/^hotreload: building/);
 			edit("Game.hx", "'v4 ticks", "'v5 ticks");
 			expect(~/^v5 ticks=/);
+
+			step("a saved asset is told to assetsChanged, by its path, once (not the editor's temporary file)");
+			save('$assets/note.txt', "one");
+			expect(~/^main: assetsChanged [^,]*\/assets\/note\.txt$/);
+
+			step("a second save of an asset in the same second, the same size, is told too");
+			save('$assets/note.txt', "two");
+			expect(~/^main: assetsChanged [^,]*\/assets\/note\.txt$/);
+
+			step("an asset deleted is told too, and one in a directory below");
+			FileSystem.createDirectory('$assets/sub');
+			save('$assets/sub/deep.txt', "deep");
+			expect(~/^main: assetsChanged [^,]*\/assets\/sub\/deep\.txt$/);
+			FileSystem.deleteFile('$assets/note.txt');
+			expect(~/^main: assetsChanged [^,]*\/assets\/note\.txt$/);
 		} catch (e:String) {
 			fail(e);
 		}
@@ -80,6 +98,7 @@ class RunTests {
 		program.kill();
 		program.close();
 		copyVersion("v1");
+		clearAssets();
 		Sys.println(failures == 0 ? "\nall passed" : '\n$failures failed');
 		Sys.exit(failures == 0 ? 0 : 1);
 	}
@@ -137,6 +156,22 @@ class RunTests {
 			}
 		}
 		copy('$dir/$version', '$dir/src');
+	}
+
+	/** an empty assets directory for the program to watch **/
+	static function clearAssets() {
+		function remove(path:String) {
+			if (FileSystem.isDirectory(path)) {
+				for (entry in FileSystem.readDirectory(path))
+					remove('$path/$entry');
+				FileSystem.deleteDirectory(path);
+			} else {
+				FileSystem.deleteFile(path);
+			}
+		}
+		if (FileSystem.exists(assets))
+			remove(assets);
+		FileSystem.createDirectory(assets);
 	}
 
 	static function edit(file:String, from:String, to:String) {

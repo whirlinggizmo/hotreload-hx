@@ -35,6 +35,12 @@ class Reloader {
 	/** nothing to do on JS: a reload happens as soon as the new bundle has loaded **/
 	public inline function update() {}
 
+	/**
+		Nothing to do on JS: the DevServer watches every file it serves (`--mount` serves
+		more). Here so the same main class builds for cpp too, where it names what to watch
+	**/
+	public inline function watchAssets(dir:String) {}
+
 	public inline function dispose() {}
 
 	#if hotreload

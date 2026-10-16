@@ -26,6 +26,10 @@ using StringTools;
 	`@:afterHotReload` hooks. As such a swap only happens where `update` is called, never
 	in the middle of a frame.
 
+	It watches assets too, if asked (`watchAssets`): a saved file, once its save has
+	settled, is told to `assetsChanged` by its path, from `update` as well. Nothing is
+	rebuilt; what to load again, and how, is the program's.
+
 	Outside a hot build (`-D hotreload`, on a cpp target) it does nothing.
 **/
 class Reloader {
@@ -35,15 +39,27 @@ class Reloader {
 	/** the main class's: just after, after the new code's `@:afterHotReload` hooks **/
 	public var afterReload:() -> Void;
 
+	/**
+		The main class's: the files under the watched asset directories (`watchAssets`)
+		that changed, once their saves have settled, each by its path as a program loads it:
+		the directory as it was given, then the rest (`assets/sounds/fire.ogg`). A file
+		that's gone is told too. Nothing is rebuilt
+	**/
+	public var assetsChanged:(paths:Array<String>) -> Void;
+
 	#if (hotreload && cpp && !cppia && !hotreload_library)
 	static inline var CHECK_INTERVAL = 0.25;
 
 	var config:Config;
 	var importInfo:String;
-	var stamps = new Map<String, Stamp>();
+	var sourceWatch:FileWatch;
 	var nextCheck = 0.0;
-	var settling = false;
 	var changed = new Array<String>();
+
+	/** the asset directories, as given, and their watch **/
+	var assetDirs = new Array<String>();
+
+	var assetWatch:FileWatch;
 
 	/** the sources changed since the last build started, which it tells the compilation server **/
 	var changedPaths = new Array<String>();
@@ -84,7 +100,7 @@ class Reloader {
 		cpp.cppia.Host.enableJit(!config.debug);
 		importInfo = writeImportInfo();
 		removeModules();
-		stamps = sources();
+		sourceWatch = new FileWatch(sources);
 		var names = [for (root in config.roots) root.split(".").join("/") + ".hx"];
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
 		Sys.println('hotreload: watching for changes to ${names.join(", ")} and the rest of ${dirs.join(", ")}');
@@ -97,6 +113,19 @@ class Reloader {
 		}
 	}
 
+	/**
+		Watches a directory of assets, and below: a saved file is told to `assetsChanged`.
+		Its paths start as `dir` does, so a relative one is from the working directory
+	**/
+	public function watchAssets(dir:String) {
+		dir = Path.removeTrailingSlashes(dir);
+		if (assetDirs.contains(dir))
+			return;
+		assetDirs.push(dir);
+		assetWatch = new FileWatch(assets);
+		Sys.println('hotreload: watching the assets in $dir/');
+	}
+
 	/** stops the compilation server this started, if it did **/
 	public function dispose() {
 		if (serverProcess != null) {
@@ -107,8 +136,14 @@ class Reloader {
 		server = null;
 	}
 
-	/** call every frame: checks the sources a few times a second, and swaps a finished build in **/
+	/** call every frame: checks the sources and assets a few times a second, and swaps a finished build in **/
 	public function update() {
+		var now = haxe.Timer.stamp();
+		var due = now >= nextCheck;
+		if (due) {
+			nextCheck = now + CHECK_INTERVAL;
+			checkAssets();
+		}
 		if (config == null)
 			return;
 		if (building != null) {
@@ -130,41 +165,37 @@ class Reloader {
 				}
 			}
 		}
-		var now = haxe.Timer.stamp();
-		if (now < nextCheck)
+		if (!due)
 			return;
-		nextCheck = now + CHECK_INTERVAL;
-		var current = sources();
-		var paths = [];
-		for (path => stamp in current)
-			if (!stamps.exists(path) || stamp.differs(stamps.get(path)))
-				paths.push(path);
-		for (path in stamps.keys())
-			if (!current.exists(path))
-				paths.push(path);
-		if (paths.length > 0) {
-			for (path in paths) {
-				if (!changedPaths.contains(path))
-					changedPaths.push(path);
-				var name = relative(path);
-				if (!changed.contains(name))
-					changed.push(name);
-			}
-			stamps = current;
-			// a build starts once the sources have stopped changing (a save can touch a file
-			// twice, or several files), at the next check
-			settling = true;
-		} else if (settling) {
-			// an empty source is one being saved (truncated, then written): wait for it
-			for (stamp in current)
-				if (stamp.empty())
-					return;
-			settling = false;
-			if (building != null)
-				changedSince = true;
-			else
-				startBuild();
+		// a build starts once the sources have stopped changing (FileWatch)
+		var paths = sourceWatch.check();
+		if (paths == null)
+			return;
+		for (path in paths) {
+			if (!changedPaths.contains(path))
+				changedPaths.push(path);
+			var name = relative(path);
+			if (!changed.contains(name))
+				changed.push(name);
 		}
+		if (building != null)
+			changedSince = true;
+		else
+			startBuild();
+	}
+
+	function checkAssets() {
+		if (assetWatch == null)
+			return;
+		var paths = assetWatch.check();
+		if (paths == null)
+			return;
+		Sys.println('hotreload: ${paths.join(", ")} changed');
+		if (assetsChanged != null)
+			try
+				assetsChanged(paths)
+			catch (e)
+				Sys.println('hotreload: assetsChanged failed: $e');
 	}
 
 	/** the modules an earlier run left, if it stopped while one was building **/
@@ -182,10 +213,9 @@ class Reloader {
 		} catch (_) {}
 	}
 
-	/** the .hx files in the reloaded code's directories and below, but the main class's, and when each last changed **/
-	function sources():Map<String, Stamp> {
-		var result = new Map<String, Stamp>();
-		var now = Date.now().getTime();
+	/** the .hx files in the reloaded code's directories and below, but the main class's **/
+	function sources():Map<String, String> {
+		var result = new Map<String, String>();
 		function walk(dir:String) {
 			var entries = try FileSystem.readDirectory(dir) catch (_) [];
 			for (entry in entries) {
@@ -193,10 +223,29 @@ class Reloader {
 				if (FileSystem.isDirectory(path))
 					walk(path);
 				else if (entry.endsWith(".hx") && path != config.mainFile)
-					result.set(path, Stamp.of(path, now));
+					result.set(path, path);
 			}
 		}
 		for (dir in config.dirs)
+			walk(dir);
+		return result;
+	}
+
+	/** the files in the asset directories and below, but hidden ones (an editor's: .swp) **/
+	function assets():Map<String, String> {
+		var result = new Map<String, String>();
+		function walk(dir:String) {
+			for (entry in (try FileSystem.readDirectory(dir) catch (_) [])) {
+				if (entry.startsWith("."))
+					continue;
+				var path = dir + "/" + entry;
+				if (FileSystem.isDirectory(path))
+					walk(path);
+				else
+					result.set(path, path);
+			}
+		}
+		for (dir in assetDirs)
 			walk(dir);
 		return result;
 	}
@@ -380,48 +429,12 @@ class Reloader {
 	#else
 	public function new() {}
 
-	public inline function dispose() {}
+	/** outside a hot build, nothing is watched **/
+	public inline function watchAssets(dir:String) {}
 
+	public inline function dispose() {}
 
 	/** outside a hot build, nothing to do **/
 	public inline function update() {}
 	#end
 }
-
-#if (hotreload && cpp && !cppia && !hotreload_library)
-/**
-	When a source last changed. A file's time is in whole seconds, so two saves in one
-	second would look like one: a file changed in the last few seconds has its contents'
-	hash too
-**/
-private class Stamp {
-	var mtime:Float;
-	var size:Int;
-	var hash:Null<Int>;
-
-	function new(mtime, size, hash) {
-		this.mtime = mtime;
-		this.size = size;
-		this.hash = hash;
-	}
-
-	public static function of(path:String, now:Float):Stamp {
-		try {
-			var stat = FileSystem.stat(path);
-			var mtime = stat.mtime.getTime();
-			var hash = now - mtime < 3000 ? haxe.crypto.Crc32.make(File.getBytes(path)) : null;
-			return new Stamp(mtime, stat.size, hash);
-		} catch (_) {
-			return new Stamp(0, 0, null);
-		}
-	}
-
-	public function empty():Bool {
-		return size == 0;
-	}
-
-	public function differs(other:Stamp):Bool {
-		return mtime != other.mtime || size != other.size || (hash != null && other.hash != null && hash != other.hash);
-	}
-}
-#end

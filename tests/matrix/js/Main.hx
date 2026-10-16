@@ -5,7 +5,8 @@
 **/
 class Main {
 	static function main() {
-		new hotreload.Reloader();
+		var reloader = new hotreload.Reloader();
+		reloader.assetsChanged = urls -> Sys.println("main: assetsChanged " + urls.join(","));
 		var held = Game.makeHeld(); // S14: an object of a reloaded class, kept by main
 		var callback = Game.makeCallback(); // S10: a callback reloaded code handed to main
 		var n = 0;
