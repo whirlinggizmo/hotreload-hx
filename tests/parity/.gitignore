@@ -1,0 +1,5 @@
+# what run.py writes: the reloaded class (from v1/ and v2/), the builds, and the logs
+src/game/
+out/
+logs/
+*.tmp

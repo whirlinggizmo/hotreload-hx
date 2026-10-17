@@ -10,12 +10,17 @@ import js.Syntax;
 	and loads it with `import()` beside itself. Then, between two frames:
 
 	1. the old code's `@:beforeHotReload` hooks, and the main class's `beforeReload`;
-	2. each static's value moves to the new class, and a new one keeps the value its
-	   bundle gave it, as does one whose type the new code changed (the build records
-	   each class's statics' types, `__hot_types__`). (A static the new code doesn't have is carried anyway, unused:
-	   Haxe doesn't emit a static with no first value, so a class's JS can't tell one
-	   that's gone from one that's never been set.) A function that's a
-	   method of the old code (`onFrame = Guest.frame`) becomes the new code's;
+	2. the statics' values move to the new classes, by the native rule: a class of the
+	   reloaded code (the build lists them, and their `@:hot` statics: a resource, each
+	   bundle its own) has only its `@:hot` statics carried over, and the rest keep the
+	   value the new bundle gave them, their first; any other class, the main class too,
+	   has every one carried over. A new static keeps its first value, and one whose type
+	   the new code changed (the build records each class's statics' types,
+	   `__hot_types__`) is carried over when it's still the same kind of value
+	   (Slot.sameKind), and keeps its first value when not. (A static the new code doesn't
+	   have is carried anyway, unused: Haxe doesn't emit a static with no first value, so a
+	   class's JS can't tell one that's gone from one that's never been set.) A function
+	   that's a method of the old code (`onFrame = Guest.frame`) becomes the new code's;
 	3. the objects the statics hold are carried over, walking arrays, maps and plain
 	   objects: an object of an old class is given the new class's prototype, in place
 	   (the same object, so every reference to it is still good), and its new fields
@@ -43,6 +48,13 @@ class JsSwap {
 		var bundle = {
 			classes: Syntax.code("$hxClasses"),
 			enums: Syntax.code("(typeof $hxEnums != 'undefined' ? $hxEnums : {})"),
+			// the reloaded classes, by name, and their `@:hot` statics (Builder): read when
+			// a swap asks, by the bundle's own code, since this runs before its statics are
+			// made (haxe.Resource's decoder's among them)
+			hot: () -> {
+				var hot = haxe.Resource.getString("hotreload.statics");
+				return hot == null ? {} : haxe.Json.parse(hot);
+			},
 			self: self,
 		};
 		var bundles:Array<Dynamic> = state.bundles;
@@ -199,21 +211,38 @@ class JsSwap {
 		// the statics' values, and what they hold
 		var walker = new Walker(protos, classes, functions, old.enums, neu.enums);
 		var moved = 0;
+		var fresh = 0;
+		var newHot:Dynamic = neu.hot();
+		var oldHot:Dynamic = old.hot();
 		for (p in pairs) {
 			if (!p.carry)
 				continue; // the first bundle's statics already read the old one's
+			// a reloaded class's `@:hot` statics, if it is one (and was): null for every static
+			var hot:Array<String> = Reflect.field(newHot, p.name);
+			var wasHot:Array<String> = Reflect.field(oldHot, p.name);
 			var oldTypes:Dynamic = Reflect.field(p.o, "__hot_types__");
 			var newTypes:Dynamic = Reflect.field(p.n, "__hot_types__");
 			for (key in statics(p.o))
 				if (!isMethod(p.n, key)) {
+					if (hot != null && (!hot.contains(key) || (wasHot != null && !wasHot.contains(key)))) {
+						// a plain static of the reloaded code: the new code's first value, as natively
+						fresh++;
+						continue;
+					}
+					var value:Dynamic = Reflect.field(p.o, key);
 					var was:String = oldTypes == null ? null : Reflect.field(oldTypes, key);
 					var now:String = newTypes == null ? null : Reflect.field(newTypes, key);
 					if (was != null && now != null && was != now) {
-						// the new code declares another type: its first value, not the old one
-						log('${p.name}.$key\'s type changed ($was to $now); started over from its first value');
-						continue;
+						// the new code declares another type: what still fits is carried over (Slot.sameKind, as natively)
+						if (Slot.sameKind(value, Reflect.field(p.n, key))) {
+							log('${p.name}.$key\'s type changed ($was to $now); carried over what still fits');
+						} else {
+							log('${p.name}.$key\'s type changed ($was to $now); started over from its first value');
+							fresh++;
+							continue;
+						}
 					}
-					Reflect.setField(p.n, key, walker.visit(Reflect.field(p.o, key)));
+					Reflect.setField(p.n, key, walker.visit(value));
 					moved++;
 				}
 		}
@@ -245,7 +274,7 @@ class JsSwap {
 		for (r in reloaders)
 			if (r.afterReload != null)
 				r.afterReload();
-		log('reloaded (${[for (p in pairs) if (p.carry) p].length} classes, $moved statics, ${walker.objects} objects, '
+		log('reloaded (${[for (p in pairs) if (p.carry) p].length} classes, $moved statics kept, $fresh started over, ${walker.objects} objects, '
 			+ '${Math.round((haxe.Timer.stamp() - start) * 1000)} ms)');
 	}
 

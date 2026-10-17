@@ -22,7 +22,7 @@ class Slots {
 		}
 		if (slot.sig != sig) {
 			var fresh = first();
-			if (Migrate.sameKind(slot.value, fresh)) {
+			if (Slot.sameKind(slot.value, fresh)) {
 				Sys.println('hotreload: $key\'s type changed (${slot.sig} to $sig); carried over what still fits');
 			} else {
 				Sys.println('hotreload: $key\'s type changed (${slot.sig} to $sig); started over from its first value');

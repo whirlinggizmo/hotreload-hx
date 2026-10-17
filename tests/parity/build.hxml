@@ -1,0 +1,7 @@
+# the parity test's program, native (run.py builds and runs it)
+-cp src
+-lib hotreload-hx
+--main Main
+-D hotreload
+-debug
+--cpp out/hot

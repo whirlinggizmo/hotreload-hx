@@ -29,7 +29,8 @@ private enum Mode {
 	In the executable's build (the host), it turns on what cppia needs (`-D scriptable`,
 	`-dce no`, `-D dll_export`), finds the reloaded code, and writes down how to build it
 	again (a resource the Reloader reads). The reloaded code is the classes in the
-	directories of the classes with something hot in them, and below, but the main class.
+	directories of the classes with something hot in them, and in those `-D hotreload_paths`
+	names, and below, but the main class's file (reloadedDirs: the same for both targets).
 	Their compiled copies in the executable are renamed (`_hot.Hello`), so that the cppia
 	module's classes, under their own names, don't collide with them.
 
@@ -37,11 +38,13 @@ private enum Mode {
 	against the executable's classes (`-D dll_import`).
 
 	A JS build reloads whole: the page loads the new bundle beside the old one, and the
-	reloader (Reloader.js.hx) makes its classes the current ones, statics, objects and all.
-	So `@:hot` means nothing there: every static and function reloads. What it takes from
-	here: a guard that keeps a reloaded bundle's `main` from running again, each class's
-	field initializers, for the objects a reload carries over (their new fields start
-	from them), the reload hooks, and, for the DevServer, how to build it again.
+	reloader (Reloader.js.hx) makes its classes the current ones, objects and all. Its
+	statics follow the native rule: in the reloaded code, only the `@:hot` ones are carried
+	over, and the rest start over; elsewhere, every one is kept. What it takes from here:
+	the reloaded classes and their `@:hot` statics (a resource), a guard that keeps a
+	reloaded bundle's `main` from running again, each class's field initializers, for the
+	objects a reload carries over (their new fields start from them), the reload hooks,
+	and, for the DevServer, how to build it again.
 **/
 class Builder {
 	/** what the executable's copy of a reloaded class is renamed to: `_hot.` and its path. A reload strips it again **/
@@ -164,9 +167,7 @@ class Builder {
 			}
 			i++;
 		}
-		if (mode == JsReload)
-			return;
-		if (args.contains("--next") || args.contains("--each"))
+		if (mode == Js && (args.contains("--next") || args.contains("--each")))
 			Context.fatalError("hotreload: a hot build is one build: take --next and --each out of its hxml", Context.currentPos());
 		var cwd = Path.addTrailingSlash(Sys.getCwd());
 		var path = Context.defined("hotreload_config") ? Context.definedValue("hotreload_config") : absolute(cwd, js) + ".hotreload.json";
@@ -181,29 +182,99 @@ class Builder {
 						mainFile = fileOf(c.pos);
 					default:
 				}
-			// the project's own class paths (inside its directory; not the standard library's or
-			// a haxelib's), or else the main class's directory: watched, and below
-			var dirs = [];
-			var j = 0;
-			while (j < args.length) {
-				if ((args[j] == "-cp" || args[j] == "-p" || args[j] == "--class-path") && j + 1 < args.length) {
-					var dir = Path.removeTrailingSlashes(Path.normalize(absolute(cwd, args[j + 1])));
-					if (dir.startsWith(Path.removeTrailingSlashes(cwd)) && FileSystem.exists(dir) && !dirs.contains(dir))
-						dirs.push(dir);
+
+			// the reloaded code, as a native build has it, and its classes' `@:hot` statics:
+			// the only ones a swap carries over (JsSwap). Read off the typed classes, every
+			// build (a reload's too), since a compilation server doesn't run a cached
+			// module's build macro again; and a resource, the bundle's own
+			var hotFiles = [];
+			for (t in types)
+				switch (t) {
+					case TClassDecl(_.get() => c) if (!c.isExtern && hasHot(c)):
+						var file = fileOf(c.pos);
+						if (file != null && !hotFiles.contains(file))
+							hotFiles.push(file);
+					default:
 				}
-				j++;
-			}
-			if (dirs.length == 0 && mainFile != null)
-				dirs.push(Path.directory(mainFile));
+			var reloadDirs = reloadedDirs(hotFiles, cwd);
+			var statics = new haxe.DynamicAccess<Array<String>>();
+			for (t in types)
+				switch (t) {
+					case TClassDecl(_.get() => c) if (!c.isExtern && !c.isInterface):
+						var file = fileOf(c.pos);
+						if (file != mainFile && inside(file, reloadDirs))
+							statics.set(fullName(c.pack, c.name), [for (f in c.statics.get()) if (f.meta.has(":hot") && f.kind.match(FVar(_, _))) f.name]);
+					default:
+				}
+			Context.addResource("hotreload.statics", haxe.io.Bytes.ofString(haxe.Json.stringify(statics)));
+			if (mode == JsReload)
+				return;
+
 			var config:JsConfig = {
 				cwd: cwd,
 				args: [for (a in args) a],
-				dirs: dirs,
+				dirs: projectDirs(args, cwd, mainFile),
+				reloadDirs: reloadDirs,
+				mainFile: mainFile,
 				js: Path.normalize(absolute(cwd, js)),
 				mainClass: mainClass,
 			};
 			sys.io.File.saveContent(path, haxe.Json.stringify(config, "\t"));
 		});
+	}
+
+	/** whether a class has something hot in it: a `@:hot` static, or a reload hook **/
+	static function hasHot(c:ClassType):Bool {
+		return c.statics.get().exists(f -> f.meta.has(":hot") || f.meta.has(":beforeHotReload") || f.meta.has(":afterHotReload"));
+	}
+
+	/**
+		The reloaded code's directories, the same for both targets: those of the classes
+		with something hot in them, and those `-D hotreload_paths` names (comma-separated,
+		from the build's directory); each once, and none inside another. The main class's
+		file is never reloaded, wherever it is
+	**/
+	static function reloadedDirs(hotFiles:Array<String>, cwd:String):Array<String> {
+		var dirs = [];
+		for (file in hotFiles) {
+			var dir = Path.directory(file);
+			if (!dirs.contains(dir))
+				dirs.push(dir);
+		}
+		if (Context.defined("hotreload_paths"))
+			for (p in Context.definedValue("hotreload_paths").split(",")) {
+				p = p.trim();
+				if (p == "")
+					continue;
+				var dir = Path.removeTrailingSlashes(Path.normalize(absolute(cwd, p)));
+				if (!FileSystem.exists(dir) || !FileSystem.isDirectory(dir))
+					Context.warning('hotreload: -D hotreload_paths names $p, which isn\'t a directory', Context.currentPos());
+				else if (!dirs.contains(dir))
+					dirs.push(dir);
+			}
+		return dirs.filter(d -> !dirs.exists(other -> other != d && d.startsWith(other + "/")));
+	}
+
+	/**
+		The project's own class paths (inside its directory; not the standard library's or a
+		haxelib's), or else the main class's directory: where an edit is noticed. One
+		outside the reloaded code is told, on JS, that it runs with its statics kept, and
+		natively, that it needs a restart
+	**/
+	static function projectDirs(args:Array<String>, cwd:String, mainFile:String):Array<String> {
+		var dirs = [];
+		var j = 0;
+		while (j < args.length) {
+			if ((args[j] == "-cp" || args[j] == "-p" || args[j] == "--class-path") && j + 1 < args.length) {
+				var dir = Path.removeTrailingSlashes(Path.normalize(absolute(cwd, args[j + 1])));
+				if (dir.startsWith(Path.removeTrailingSlashes(cwd)) && FileSystem.exists(dir) && !dirs.contains(dir))
+					dirs.push(dir);
+			}
+			j++;
+		}
+		if (dirs.length == 0 && mainFile != null)
+			dirs.push(Path.directory(mainFile));
+		return dirs;
 	}
 
 	/** the executable's command line, for a reload's build: what it compiles and how, but not where to or what runs **/
@@ -243,15 +314,7 @@ class Builder {
 				default:
 			}
 
-		// the directories of the classes with something hot in them, each once, and none
-		// inside another
-		var dirs = [];
-		for (h in hotClasses) {
-			var dir = Path.directory(h.file);
-			if (!dirs.contains(dir))
-				dirs.push(dir);
-		}
-		dirs = dirs.filter(d -> !dirs.exists(other -> other != d && d.startsWith(other + "/")));
+		var dirs = reloadedDirs([for (h in hotClasses) h.file], cwd);
 
 		// the executable's copies of the reloaded classes, renamed out of the modules' way
 		for (t in types) {
@@ -282,6 +345,7 @@ class Builder {
 			args: args,
 			roots: roots,
 			dirs: dirs,
+			sourceDirs: projectDirs(args, cwd, mainFile),
 			mainFile: mainFile,
 			mainClass: mainClass,
 			buildDir: buildDir,
@@ -316,20 +380,10 @@ class Builder {
 				result.push(field);
 				continue;
 			}
-			if (mode == Host && isMain(cls))
-				Context.error("@:hot and the reload hooks can't be used in the main class because the main class is never reloaded. "
-					+ "Use them in the reloaded classes (for the main class's own, set reloader.beforeReload and reloader.afterReload)", field.pos);
-			if (!field.access.contains(AStatic))
-				Context.error("@:hot and the reload hooks are for statics: an instance is carried across a reload with its fields", field.pos);
+			checkHot(cls, field, hook);
 			changed = true;
 			hasHot = true;
 			if (hook != null) {
-				var fn = switch (field.kind) {
-					case FFun(f): f;
-					default: Context.error('@${hook.name}: a static function', field.pos);
-				}
-				if (fn.args.length > 0)
-					Context.error('@${hook.name}: a function with no parameters', field.pos);
 				result.push(field);
 				var after = hook.name == ":afterHotReload";
 				var name = field.name;
@@ -342,7 +396,6 @@ class Builder {
 				case FFun(f):
 					hotFunction(className, field, f, result, extra);
 				case FProp(_, _, _, _):
-					Context.error("@:hot: a static var or function, not a property", field.pos);
 			}
 		}
 
@@ -376,23 +429,54 @@ class Builder {
 	}
 
 	/**
+		What `@:hot` and the reload hooks can be on, the same for both targets: a static
+		var or function of a class other than the main class (which a native build never
+		reloads); a hook, a static function with no parameters; a `@:hot` var, one with a
+		type or a first value (its type, which a reload compares)
+	**/
+	static function checkHot(cls:ClassType, field:Field, hook:MetadataEntry) {
+		if (isMain(cls))
+			Context.error("@:hot and the reload hooks can't be used in the main class because the main class is never reloaded. "
+				+ "Use them in the reloaded classes (for the main class's own, set reloader.beforeReload and reloader.afterReload)", field.pos);
+		if (!field.access.contains(AStatic))
+			Context.error("@:hot and the reload hooks are for statics: an instance is carried across a reload with its fields", field.pos);
+		if (hook != null) {
+			var fn = switch (field.kind) {
+				case FFun(f): f;
+				default: Context.error('@${hook.name}: a static function', field.pos);
+			}
+			if (fn.args.length > 0)
+				Context.error('@${hook.name}: a function with no parameters', field.pos);
+			return;
+		}
+		switch (field.kind) {
+			case FVar(null, null):
+				Context.error("@:hot: give it a type, or a first value", field.pos);
+			case FProp(_, _, _, _):
+				Context.error("@:hot: a static var or function, not a property", field.pos);
+			default:
+		}
+	}
+
+	/** a `@:hot` var's type, and that type as a reload compares it: the one written, or else its first value's **/
+	static function hotType(field:Field, t:ComplexType, e:Expr):{t:ComplexType, sig:String} {
+		if (t != null)
+			return {t: t, sig: try Context.resolveType(t, field.pos).toString() catch (_) t.toString()};
+		var type = try Context.typeof(e) catch (_) null;
+		if (type == null)
+			Context.error("@:hot: give it a type (its first value's can't be found here)", field.pos);
+		return {t: Context.toComplexType(type), sig: type.toString()};
+	}
+
+	/**
 		`@:hot static var x:T = first`: a property whose storage is a Slot the executable
 		keeps, by the class and name, which every module that loads is handed. Its first
 		value is used once, when the slot is made
 	**/
 	static function hotVar(className:String, field:Field, t:ComplexType, e:Expr, result:Array<Field>, extra:Array<Field>) {
-		var sig = null;
-		if (t == null) {
-			if (e == null)
-				Context.error("@:hot: give it a type, or a first value", field.pos);
-			var type = try Context.typeof(e) catch (_) null;
-			if (type == null)
-				Context.error("@:hot: give it a type (its first value's can't be found here)", field.pos);
-			t = Context.toComplexType(type);
-			sig = type.toString();
-		} else {
-			sig = try Context.resolveType(t, field.pos).toString() catch (_) t.toString();
-		}
+		var typed = hotType(field, t, e);
+		t = typed.t;
+		var sig = typed.sig;
 		var name = field.name;
 		var slot = '__hot_$name';
 		var key = className + "." + name;
@@ -498,24 +582,24 @@ class Builder {
 		var extra = [];
 		var types = [];
 		for (field in fields) {
+			var hot = field.meta.exists(m -> m.name == ":hot");
+			var hook = field.meta.find(m -> m.name == ":beforeHotReload" || m.name == ":afterHotReload");
+			if (hot || hook != null)
+				checkHot(cls, field, hook);
 			// a static's type, as written (or its first value's): a reload that changes it
-			// starts the static over, rather than carry a value of the old type into it
+			// carries the value over only when it's still the same kind (Slot.sameKind). A
+			// `@:hot` one's as the native build has it, so the two say the same
 			if (field.access.contains(AStatic))
 				switch (field.kind) {
+					case FVar(t, e) if (hot):
+						types.push({field: field.name, expr: macro $v{hotType(field, t, e).sig}});
 					case FVar(t, e) | FProp(_, _, t, e):
 						var sig = if (t != null) t.toString() else if (e != null) try Context.typeof(e).toString() catch (_) null else null;
 						if (sig != null)
 							types.push({field: field.name, expr: macro $v{sig}});
 					default:
 				}
-			var hook = field.meta.find(m -> m.name == ":beforeHotReload" || m.name == ":afterHotReload");
 			if (hook != null) {
-				var fn = switch (field.kind) {
-					case FFun(f) if (field.access.contains(AStatic)): f;
-					default: Context.error('@${hook.name}: a static function', field.pos);
-				}
-				if (fn.args.length > 0)
-					Context.error('@${hook.name}: a function with no parameters', field.pos);
 				var after = hook.name == ":afterHotReload";
 				var name = field.name;
 				extra.push(staticVar('__hot_hook_$name', macro:Bool, macro hotreload.Hooks.add($v{after}, $i{name}), field.pos));
@@ -794,6 +878,12 @@ typedef JsConfig = {
 	/** where the sources are: the project's own class paths, watched, and below **/
 	var dirs:Array<String>;
 
+	/** where the reloaded code is, as a native build has it: an edit elsewhere runs, with its classes' statics kept **/
+	var reloadDirs:Array<String>;
+
+	/** the main class's file, which is never part of the reloaded code **/
+	var mainFile:String;
+
 	/** the bundle **/
 	var js:String;
 
@@ -814,7 +904,10 @@ typedef Config = {
 	/** where the reloaded code is: watched, and below **/
 	var dirs:Array<String>;
 
-	/** the main class's file, which isn't watched **/
+	/** the project's own class paths: an edit outside the reloaded code needs a restart, which is said **/
+	var sourceDirs:Array<String>;
+
+	/** the main class's file, which isn't reloaded **/
 	var mainFile:String;
 
 	var mainClass:String;

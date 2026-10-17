@@ -53,6 +53,9 @@ class Reloader {
 	var config:Config;
 	var importInfo:String;
 	var sourceWatch:FileWatch;
+
+	/** the project's sources outside the reloaded code (and the main class's): an edit there needs a restart, which is said **/
+	var outsideWatch:FileWatch;
 	var nextCheck = 0.0;
 	var changed = new Array<String>();
 
@@ -101,6 +104,7 @@ class Reloader {
 		importInfo = writeImportInfo();
 		removeModules();
 		sourceWatch = new FileWatch(sources);
+		outsideWatch = new FileWatch(outsideSources);
 		var names = [for (root in config.roots) root.split(".").join("/") + ".hx"];
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
 		Sys.println('hotreload: watching for changes to ${names.join(", ")} and the rest of ${dirs.join(", ")}');
@@ -167,6 +171,9 @@ class Reloader {
 		}
 		if (!due)
 			return;
+		var outside = outsideWatch.check();
+		if (outside != null)
+			Sys.println('hotreload: ${[for (p in outside) relative(p)].join(", ")} changed, outside the reloaded code: restart to run it');
 		// a build starts once the sources have stopped changing (FileWatch)
 		var paths = sourceWatch.check();
 		if (paths == null)
@@ -228,6 +235,25 @@ class Reloader {
 		}
 		for (dir in config.dirs)
 			walk(dir);
+		return result;
+	}
+
+	/** the .hx files in the project's class paths and below that aren't the reloaded code's: the main class's, and the rest **/
+	function outsideSources():Map<String, String> {
+		var result = new Map<String, String>();
+		function walk(dir:String) {
+			for (entry in (try FileSystem.readDirectory(dir) catch (_) [])) {
+				var path = dir + "/" + entry;
+				if (FileSystem.isDirectory(path))
+					walk(path);
+				else if (entry.endsWith(".hx") && path != config.mainFile && !config.dirs.exists(d -> path.startsWith(d + "/")))
+					result.set(path, path);
+			}
+		}
+		for (dir in config.sourceDirs)
+			walk(dir);
+		if (config.mainFile != null && FileSystem.exists(config.mainFile))
+			result.set(config.mainFile, config.mainFile);
 		return result;
 	}
 

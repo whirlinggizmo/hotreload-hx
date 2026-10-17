@@ -34,25 +34,6 @@ class Migrate {
 			m.pending.pop()();
 	}
 
-	/** whether a value of one type can be carried to another: the same kind of value, or one to a type with no first value (null) **/
-	public static function sameKind(old:Dynamic, fresh:Dynamic):Bool {
-		var o = kind(old), f = kind(fresh);
-		if (f == "null")
-			return o == "null" || o == "object" || o == "string";
-		return o == f || o == "null";
-	}
-
-	static function kind(v:Dynamic):String {
-		return switch (Type.typeof(v)) {
-			case TNull: "null";
-			case TInt | TFloat: "number";
-			case TBool: "bool";
-			case TFunction: "function";
-			case TClass(c) if (c == String): "string";
-			default: "object";
-		}
-	}
-
 	function new(resolve) {
 		this.resolve = resolve;
 	}
@@ -156,7 +137,7 @@ class Migrate {
 
 	/** whether an old field's value fits the new field, by the new one's default: a number for a number, a bool for a bool, and anything else for null **/
 	static function fits(value:Dynamic, def:Dynamic):Bool {
-		var v = kind(value), d = kind(def);
+		var v = Slot.kind(value), d = Slot.kind(def);
 		if (v == "null")
 			return true;
 		if (d == "null")
