@@ -10,11 +10,11 @@ import js.Syntax;
 	and loads it with `import()` beside itself. Then, between two frames:
 
 	1. the old code's `@:beforeHotReload` hooks, and the main class's `beforeReload`;
-	2. the statics' values move to the new classes, by the native rule: a class of the
-	   reloaded code (the build lists them, and their `@:hot` statics: a resource, each
+	2. the statics' values move to the new classes, by the same rule as native: a class
+	   of the project's (the build lists them, and their `@:hot` statics: a resource, each
 	   bundle its own) has only its `@:hot` statics carried over, and the rest keep the
-	   value the new bundle gave them, their first; any other class, the main class too,
-	   has every one carried over. A new static keeps its first value, and one whose type
+	   value the new bundle gave them, their first; any other class (the main class, the
+	   standard library, a haxelib) has every one carried over. A new static keeps its first value, and one whose type
 	   the new code changed (the build records each class's statics' types,
 	   `__hot_types__`) is carried over when it's still the same kind of value
 	   (Slot.sameKind), and keeps its first value when not. (A static the new code doesn't
@@ -48,7 +48,7 @@ class JsSwap {
 		var bundle = {
 			classes: Syntax.code("$hxClasses"),
 			enums: Syntax.code("(typeof $hxEnums != 'undefined' ? $hxEnums : {})"),
-			// the reloaded classes, by name, and their `@:hot` statics (Builder): read when
+			// the project's classes, by name, and their `@:hot` statics (Builder): read when
 			// a swap asks, by the bundle's own code, since this runs before its statics are
 			// made (haxe.Resource's decoder's among them)
 			hot: () -> {
@@ -217,7 +217,7 @@ class JsSwap {
 		for (p in pairs) {
 			if (!p.carry)
 				continue; // the first bundle's statics already read the old one's
-			// a reloaded class's `@:hot` statics, if it is one (and was): null for every static
+			// a project class's `@:hot` statics, if it is one (and was): null for every static
 			var hot:Array<String> = Reflect.field(newHot, p.name);
 			var wasHot:Array<String> = Reflect.field(oldHot, p.name);
 			var oldTypes:Dynamic = Reflect.field(p.o, "__hot_types__");
@@ -225,7 +225,10 @@ class JsSwap {
 			for (key in statics(p.o))
 				if (!isMethod(p.n, key)) {
 					if (hot != null && (!hot.contains(key) || (wasHot != null && !wasHot.contains(key)))) {
-						// a plain static of the reloaded code: the new code's first value, as natively
+						// a plain static of the project's: the new code's first value, as natively. One
+						// with none isn't emitted (Haxe leaves a null first value out too): null, not undefined
+						if (!Syntax.code("Object.prototype.hasOwnProperty.call({0}, {1})", p.n, key))
+							Reflect.setField(p.n, key, null);
 						fresh++;
 						continue;
 					}

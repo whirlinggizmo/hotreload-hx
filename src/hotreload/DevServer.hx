@@ -17,7 +17,6 @@ import sys.net.Socket;
 import sys.thread.Mutex;
 import sys.thread.Thread;
 
-using Lambda;
 using StringTools;
 
 /**
@@ -141,10 +140,6 @@ class DevServer {
 		for (url => dir in mounts)
 			Sys.println('hotreload: and $dir at $url/');
 		Sys.println('hotreload: watching ${dirs.join(", ")}');
-		if (config.reloadDirs.length == 0)
-			Sys.println("hotreload: no class has @:hot statics or reload hooks, so every static is kept (a native build would have nothing to reload)");
-		else
-			Sys.println('hotreload: the reloaded code: ${[for (d in config.reloadDirs) relative(d) + "/"].join(", ")}');
 		Thread.create(watchAssets);
 		watch(compilationServer);
 		// the compilation server's shell sees this process go, and stops it
@@ -232,16 +227,6 @@ class DevServer {
 		lock.release();
 		var ms = Math.round((haxe.Timer.stamp() - start) * 1000);
 		Sys.println(code == 0 ? 'hotreload: built in $ms ms; the page loads it next' : "hotreload: build failed; the page keeps what it has");
-		// what a native build couldn't reload: said, so a program behaves the same on both
-		var outside = [for (p in changed) if (!reloaded(p)) relative(p)];
-		if (code == 0 && config.reloadDirs.length > 0 && outside.length > 0)
-			Sys.println('hotreload: ${outside.join(", ")} ${outside.length == 1 ? "is" : "are"} outside the reloaded code: '
-				+ "the new code runs, with its classes' statics kept (a native build needs a restart for it)");
-	}
-
-	/** whether a source is part of the reloaded code (Builder.reloadedDirs) **/
-	static function reloaded(path:String):Bool {
-		return path != config.mainFile && config.reloadDirs.exists(d -> path.startsWith(d + "/"));
 	}
 
 	/**

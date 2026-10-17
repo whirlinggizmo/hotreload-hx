@@ -421,6 +421,15 @@ class Reloader {
 		Hooks.runBefore(); // the old code's
 		if (beforeReload != null)
 			beforeReload();
+		// the project's classes outside the module start their plain statics over, as the
+		// module's do when it starts: a plain static starts over on every reload, wherever
+		// it is, as on JS
+		for (name in config.resetClasses) {
+			var cls = Type.resolveClass(name);
+			var reset = cls == null ? null : Reflect.field(cls, "__hot_reset__");
+			if (reset != null)
+				Reflect.callMethod(cls, reset, []);
+		}
 		// the module's classes start: their statics are made (the @:hot ones are handed
 		// their slots), and they add their hooks
 		Hooks.forget();

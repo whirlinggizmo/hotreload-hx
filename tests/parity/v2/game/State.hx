@@ -24,6 +24,6 @@ class State {
 	}
 
 	static function report() {
-		Main.say('report v2 kept=$kept plain=$plain widened=$widened label=$label added=$added service=$service outside=${Outside.count} main=${Main.count}');
+		Main.say('report v2 kept=$kept plain=$plain widened=$widened label=$label added=$added service=$service outside=${Outside.count},${Outside.tag},${Outside.n},${Outside.list.length} main=${Main.count}');
 	}
 }
