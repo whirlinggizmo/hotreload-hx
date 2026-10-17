@@ -13,8 +13,8 @@ Two targets reload, and they follow the same rules:
 - **JavaScript (browser or node):** a dev server rebuilds the bundle, and the running
   program takes on its classes. See [JavaScript](#javascript-browser-or-node).
 
-The rules are in [How it works](#how-it-works), and what still differs between the targets
-is in [Differences between the targets](#differences-between-the-targets). It's the Haxe
+The rules are in [The rules](#the-rules), and what still differs between the targets is in
+[Differences between the targets](#differences-between-the-targets). It's the Haxe
 side of [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim).
 
 ## Install
@@ -28,9 +28,13 @@ haxelib git hotreload-hx https://github.com/whirlinggizmo/hotreload-hx
 or, from a clone, `haxelib dev hotreload-hx <clone>`. Each target's own requirements are in
 its section. Only Linux is tested so far.
 
-## How it works
+## The rules
 
-This part is the same on both targets. Code written to it behaves the same on both.
+This part is the same on both targets, and code written to it behaves the same on both.
+There are two rules: *a static of yours survives a reload if it says `@:hot`*, and *a
+callback that may outlive a reload is a lambda that calls a `@:hot` function*. The rest of
+this section is what they mean in practice. How each target does it is under
+[Native](#how-a-native-reload-works) and [JavaScript](#how-a-js-reload-works).
 
 ### Your code, the main class, and libraries
 
@@ -71,8 +75,9 @@ If a reload changes a `@:hot` static's type, its value is kept when it's still t
 hotreload: game.State.label's type changed (Int to String); started over from its first value
 ```
 
-`@:hot` takes a static var or function. A var needs a type or a first value. It can also be
-read-only from outside, `(default, null)` or `(default, never)`:
+`@:hot` takes a static var, or a static function ([Callbacks](#callbacks)). A var needs a
+type or a first value. It can also be read-only from outside, `(default, null)` or
+`(default, never)`:
 
 ```haxe
 @:hot public static var graphics(default, null):Graphics; // everyone reads it; only its class sets it
@@ -81,13 +86,9 @@ read-only from outside, `(default, null)` or `(default, never)`:
 `@:hot` and the hooks can't be used in the main class, on an instance field, or on a
 property with accessors: each is a build error on both targets.
 
-So the rule is one line: *a static of yours survives a reload only if it says `@:hot`.*
-
-### Objects
-
-On each reload, objects of the reloaded classes reachable from the `@:hot` statics take on
-the new classes, field by field by name. A removed field is dropped, and a new one starts
-from its initializer:
+What a `@:hot` static holds survives with it. On each reload, the objects reachable from the
+`@:hot` statics take on the new classes, field by field by name. A removed field is dropped,
+and a new one starts from its initializer:
 
 ```haxe
 class Enemy {
@@ -98,50 +99,38 @@ class Enemy {
 
 hotreload walks arrays, maps, anonymous structures, reloaded classes' fields and reloaded
 enums' values (matched by constructor name). Shared objects stay shared and cycles stay
-cycles.
-
-### `@:hot` functions
-
-Natively, code compiled before a reload keeps calling what it was compiled with: the main
-class, which is compiled once, and a closure made before the reload, whose module stays
-loaded. A `@:hot` static function is called through the reloader instead, so a call from
-anywhere reaches the newest version.
-
-The build marks the static functions the main class calls itself, so the usual entry points
-need nothing written:
-
-```haxe
-class Game {
-	public static function init() { ... }   // called by the main class: @:hot, by the build
-	public static function tick() { ... }   // the same, every frame: reaches the new code
-}
-```
-
-You write `@:hot` on a function a callback calls (below). Anything only the current code
-calls is an ordinary function. A `@:hot` function's types must be written out (or come from
-a default value); with neither, a function that returns nothing is `Void`, and the build
-says which function it means when it was its own mark. A call the build can't see, through
-an import alias, is warned about: mark that function yourself. On JS every call by name
-reaches the new code, so `@:hot` on a function changes nothing there, and the same code
-works on both.
+cycles. An object held only from outside the `@:hot` statics, by the main class, say, isn't
+reached, and natively keeps its old code.
 
 ### Callbacks
 
-A closure made before a reload keeps its own code on both targets, but what it calls by
-name is looked up when it runs. On JS that reaches the new code. Natively it reaches the new
-code through a `@:hot` function, and the old module's code otherwise, and an object the
-closure captured is the old copy, which the new code no longer holds. So a callback that
-may outlive a reload, a load's completion, say, does best as a springboard: a lambda that
-calls a `@:hot` function by name and leaves the work to it.
+The main class calls into your code through static functions, and the build marks those
+`@:hot` itself: each reload points them at the new code, so the main class needs nothing
+written. (On JS every call reaches the new code anyway. Natively, a `@:hot` function is
+what makes a call from code compiled before the reload reach the new code.)
+
+A callback is the same situation, made by your own code. A closure made before a reload
+keeps its own code on both targets, and natively so do the methods it calls and the object
+it captured. So a callback that may outlive a reload, a load's completion, say, is a
+springboard: a lambda that calls a `@:hot` static function by name and leaves the work to
+it.
 
 ```haxe
-Models.load("ship.obj", file -> Game.loaded(file)); // reaches the newest `loaded`, on both targets
+@:hot static function loaded(file:Model) { ... }   // its types written out: a reload checks them
+Models.load("ship.obj", file -> loaded(file));    // reaches the newest `loaded`, on both targets
 ```
 
-A method passed as a value (`Models.load("ship.obj", place)`) is a bound method, or a
-static's closure, which no reload can re-point: it runs its old code on both targets, and
-the build warns about one. A callback registered once for the program's life (for input,
-say) can be made again in an `@:afterHotReload` hook instead.
+Don't pass a method as a value (`Models.load("ship.obj", loaded)`). That's a bound method,
+or a static's closure, which no reload can re-point, so it runs its old code on both
+targets; the build warns about one, in your code and in the main class. A callback
+registered once for the program's life (for input, say) can be made again in an
+`@:afterHotReload` hook instead.
+
+A `@:hot` function's parameter and return types are written out (or come from a default
+value); with neither, a function that returns nothing is `Void`. When the build marked the
+function because the main class calls it, its message says so. A call the build can't see,
+through an import alias, is warned about: mark that function yourself.
+
 
 ### Reload hooks
 
@@ -275,7 +264,7 @@ A few times a second, `update()` checks the reloaded code's sources. Once a chan
 settled, it builds a module in the background while the old code keeps running; compiler
 errors go to the terminal. The first `update()` after the build checks the `@:hot` functions'
 signatures, runs the hooks, starts the module, carries the `@:hot` statics over and points
-the main class's calls at the new code. So a swap never happens in the middle of a frame.
+the `@:hot` functions at the new code. So a swap never happens in the middle of a frame.
 
 - Each reload is a new module (`main_1.cppia`, `main_2.cppia`, ...). The executable's own
   copies of the reloaded classes run until the first reload, renamed (`_hot.Game`) so they
@@ -289,6 +278,10 @@ the main class's calls at the new code. So a swap never happens in the middle of
   loader, say) still works when it fires. It runs its own old code, on the same `@:hot`
   statics: a `@:hot` function it calls is the newest, any other method is the old module's,
   and an object it captured is the old copy, which the new code no longer holds.
+- A `@:hot` function (the ones the main class calls, which the build marks, and the ones
+  you mark for callbacks) is a stub calling through a variable, in the executable and in
+  every module. A reload points every copy at the new module's function, which is how the
+  main class, and a callback made before the reload, reach the newest code.
 - A `@:hot` function whose signature changed is refused with a message, and the old code
   runs on until a restart. The same goes for adding or renaming one.
 - An edit outside the reloaded code is reported, and needs a restart:
@@ -460,7 +453,9 @@ connections.
 - Old classes forward to the new ones, so leftover old code (a callback, an object nothing
   walked to) runs the new code, on the same state.
 - A method reference in a static (`onFrame = Guest.frame`) points to the new code.
-- Signature changes need no restart, since every caller reloads too.
+- Signature changes need no restart, since every caller reloads too. `@:hot` on a function,
+  the build's mark or yours, changes nothing here; it's there so the same source builds for
+  both targets.
 
 The dev server also watches the files it serves (except the bundle) and reports saved ones
 to the reloader's `assetsChanged`, by URL.

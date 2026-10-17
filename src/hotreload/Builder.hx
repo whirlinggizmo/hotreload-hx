@@ -279,12 +279,14 @@ class Builder {
 		A method of your code passed as a value, `load(path, place)`, is a bound method or
 		a static's closure, which no reload can re-point: it runs its old code, on both
 		targets. A lambda that calls the method by name, `x -> place(x)`, reaches the new
-		code (natively, through a `@:hot` function). Told, at each use, in every hot build
+		code (natively, through a `@:hot` function). Told, at each use, in every hot build,
+		in your code and in the main class
 	**/
 	static function warnMethodValues(types:Array<ModuleType>) {
 		for (t in types)
 			switch (t) {
-				case TClassDecl(_.get() => c) if (isYours(c)):
+				// (the main class's too: `reloader.assetsChanged = Game.assetsChanged` is as stuck)
+				case TClassDecl(_.get() => c) if (isYours(c) || fullName(c.pack, c.name) == mainClass):
 					var fields = c.statics.get().concat(c.fields.get());
 					if (c.constructor != null)
 						fields.push(c.constructor.get());
