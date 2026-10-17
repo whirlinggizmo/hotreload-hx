@@ -12,7 +12,9 @@ statics:
 - the main class's statics are kept;
 - a completion made in the reloaded code before a reload (a lambda calling a @:hot function
   by name), held by the main class, reaches the new code after it;
-- a method of your code passed as a value is warned about, by both builds alike.
+- a method of your code passed as a value is warned about, by both builds alike;
+- the static functions the main class calls are @:hot without being marked, and a call the
+  build can't see (through an alias) is warned about, by both builds alike.
 
     python3 tests/parity/run.py            both targets, then the comparison
     python3 tests/parity/run.py cpp        one target (cpp or js), with its own checks
@@ -114,16 +116,17 @@ def warnings(target):
                        cwd=HERE, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit("the warn/ build failed:\n" + r.stderr)
-    lines = [l.strip() for l in r.stderr.splitlines() if "Warning" in l and "hotreload:" in l]
+    lines = sorted(l.strip() for l in r.stderr.splitlines() if "Warning" in l and "hotreload:" in l)
     for l in lines:
         print("    | " + l)
     return lines
 
 
-WARNINGS = [
+WARNINGS = sorted([
+    "warn/Main.hx:10: characters 3-12 : Warning : hotreload: the main class calls Warn.later in a way the build can't see (through an alias?), so it isn't @:hot: mark it yourself, or a native reload won't reach it",
     "warn/Warn.hx:14: characters 8-15 : Warning : hotreload: place passed as a value keeps its old code after a reload; call it from a lambda, x -> place(x)",
     "warn/Warn.hx:15: characters 8-16 : Warning : hotreload: placeAll passed as a value keeps its old code after a reload; call it from a lambda, x -> placeAll(x)",
-]
+])
 
 
 def check(name, result):

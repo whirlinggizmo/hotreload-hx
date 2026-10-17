@@ -2,7 +2,7 @@
 class Warn {
 	@:hot static var pending:Array<Int->Void> = [];
 
-	@:hot public static function start() {
+	public static function start() {
 		var w = new Warn();
 		load(x -> w.place(x));
 		load(x -> placeAll(x));
@@ -20,6 +20,8 @@ class Warn {
 	}
 
 	static function placeAll(x:Int) {}
+
+	public static function later() {}
 
 	function new() {}
 

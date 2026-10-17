@@ -68,6 +68,17 @@ class Builder {
 	static var libraryMain:String;
 	static var configured = false;
 
+	/**
+		the calls the main class makes, as written (`game.Game.init`, `Game.update`): the
+		static functions of your code among them are marked `@:hot` by the build, since the
+		main class is what calls them after a reload. Read off the main class's fields as
+		it's built, which is before any class it calls is
+	**/
+	static var mainCalls = new Map<String, Bool>();
+
+	/** the functions marked that way, `game.Game.update`: told to a reload's build, which marks the same **/
+	static var entries:Array<String> = [];
+
 	public static function init() {
 		// once per build, however many times the build names the library
 		if (Context.defined("hotreload_initialized"))
@@ -82,11 +93,15 @@ class Builder {
 		libraryDirs = [];
 		libraryMain = null;
 		configured = false;
+		mainCalls = new Map();
+		entries = [];
 		std = null;
 		if (Context.defined("hotreload_library")) {
 			mode = Library;
 			libraryDirs = Context.definedValue("hotreload_dirs").split("|");
 			libraryMain = Context.definedValue("hotreload_main");
+			if (Context.defined("hotreload_entries"))
+				entries = Context.definedValue("hotreload_entries").split("|");
 			Compiler.define("dce", "no");
 			invalidate();
 			Context.onAfterTyping(warnMethodValues);
@@ -140,6 +155,7 @@ class Builder {
 
 		Context.onAfterTyping(types -> {
 			warnMethodValues(types);
+			checkMainCalls(types);
 			if (configured)
 				return;
 			configured = true;
@@ -189,6 +205,7 @@ class Builder {
 		var path = Context.defined("hotreload_config") ? Context.definedValue("hotreload_config") : absolute(cwd, js) + ".hotreload.json";
 		Context.onAfterTyping(types -> {
 			warnMethodValues(types);
+			checkMainCalls(types);
 			if (configured)
 				return;
 			configured = true;
@@ -307,6 +324,94 @@ class Builder {
 		}
 	}
 
+	/** the main class's calls, as written: `a.b.c(...)` is "a.b.c" **/
+	static function collectCalls(fields:Array<Field>) {
+		function walk(e:Expr) {
+			switch (e.expr) {
+				case ECall({expr: EField(target, name)}, _):
+					var path = dotted(target);
+					if (path != null)
+						mainCalls.set(path + "." + name, true);
+				default:
+			}
+			e.iter(walk);
+		}
+		for (f in fields)
+			switch (f.kind) {
+				case FFun(fn) if (fn.expr != null): walk(fn.expr);
+				case FVar(_, e) | FProp(_, _, _, e) if (e != null): walk(e);
+				default:
+			}
+	}
+
+	static function dotted(e:Expr):Null<String> {
+		return switch (e.expr) {
+			case EConst(CIdent(s)): s;
+			case EField(sub, name):
+				var p = dotted(sub);
+				p == null ? null : p + "." + name;
+			default: null;
+		}
+	}
+
+	/**
+		A static function of your code that the main class calls (by the class's full name
+		or its own; a call through an alias isn't seen, and checkMainCalls says so). In a
+		reload's build, the ones the executable's build marked
+	**/
+	static function isEntry(cls:ClassType, className:String, field:Field):Bool {
+		if (!field.access.contains(AStatic) || field.access.contains(AInline) || !field.kind.match(FFun(_)) || field.name == "main")
+			return false;
+		var full = className + "." + field.name;
+		return switch (mode) {
+			case Host: isProject(cls) && (mainCalls.exists(full) || mainCalls.exists(cls.name + "." + field.name));
+			case Library: entries.contains(full);
+			default: false;
+		}
+	}
+
+	/** whether a `@:hot` was the build's own (isEntry), for the messages **/
+	static function isAuto(field:Field):Bool {
+		var hot = field.meta.find(m -> m.name == ":hot");
+		return hot != null && hot.params != null && hot.params.length > 0;
+	}
+
+	/**
+		The main class's calls into your code, typed: each is to a `@:hot` function, the
+		build's own mark or the code's, or a native reload won't reach it, which is told.
+		(Natively, the ones marked have a `__hot_sig_`; on JS, the metadata)
+	**/
+	static function checkMainCalls(types:Array<ModuleType>) {
+		for (t in types)
+			switch (t) {
+				case TClassDecl(_.get() => c) if (fullName(c.pack, c.name) == mainClass):
+					for (f in c.statics.get().concat(c.fields.get())) {
+						var e = f.expr();
+						if (e != null)
+							mainCallsIn(e);
+					}
+				default:
+			}
+	}
+
+	static function mainCallsIn(e:TypedExpr) {
+		switch (e.expr) {
+			case TCall({expr: TField(_, FStatic(cref, cfref))}, _):
+				var c = cref.get();
+				var cf = cfref.get();
+				if (isProject(c) && cf.kind.match(FMethod(MethNormal))) {
+					var full = fullName(c.pack, c.name) + "." + cf.name;
+					var marked = cf.meta.has(":hot") || mainCalls.exists(full) || mainCalls.exists(c.name + "." + cf.name)
+						|| c.statics.get().exists(s -> s.name == "__hot_sig_" + cf.name);
+					if (!marked)
+						Context.warning('hotreload: the main class calls ${c.name}.${cf.name} in a way the build can\'t see (through an alias?), so it isn\'t @:hot: '
+							+ "mark it yourself, or a native reload won't reach it", e.pos);
+				}
+			default:
+		}
+		e.iter(mainCallsIn);
+	}
+
 	/** the directories of the classes with something hot in them: the reloaded code, natively; each once, and none inside another **/
 	static function hotDirs():Array<String> {
 		var dirs = [];
@@ -387,6 +492,7 @@ class Builder {
 			dirs: dirs,
 			sourceDirs: projectDirs,
 			resetClasses: resetClasses,
+			entries: entries,
 			mainFile: mainFile,
 			mainClass: mainClass,
 			buildDir: buildDir,
@@ -407,6 +513,8 @@ class Builder {
 		var cls = ref.get();
 		var fields = Context.getBuildFields();
 		var className = fullName(cls.pack, cls.name);
+		if (isMain(cls))
+			collectCalls(fields);
 		if (mode == Js || mode == JsReload)
 			return buildJs(cls, fields, className);
 		var changed = false;
@@ -417,6 +525,13 @@ class Builder {
 		for (field in fields) {
 			var hot = field.meta.exists(m -> m.name == ":hot");
 			var hook = field.meta.find(m -> m.name == ":beforeHotReload" || m.name == ":afterHotReload");
+			if (!hot && hook == null && isEntry(cls, className, field)) {
+				// a static function the main class calls: `@:hot`, as if written, and said so
+				field.meta.push({name: ":hot", params: [macro "main"], pos: field.pos});
+				hot = true;
+				if (mode == Host)
+					entries.push(className + "." + field.name);
+			}
 			if (!hot && hook == null) {
 				result.push(field);
 				continue;
@@ -570,23 +685,25 @@ class Builder {
 	**/
 	static function hotFunction(className:String, field:Field, f:Function, result:Array<Field>, extra:Array<Field>) {
 		var name = field.name;
+		// (the main class calls it, so a reload checks its signature, as for one marked by hand)
+		var why = isAuto(field) ? '$name is called by the main class, so it\'s @:hot: ' : "@:hot: ";
 		if (f.params != null && f.params.length > 0)
-			Context.error("@:hot: not a generic function", field.pos);
+			Context.error(why + "not a generic function", field.pos);
 		var argTypes = [];
 		for (a in f.args) {
 			var t = a.type;
 			if (t == null && a.value != null)
 				t = try Context.toComplexType(Context.typeof(a.value)) catch (_) null;
 			if (t == null)
-				Context.error('@:hot: give ${a.name} a type: a reload checks it hasn\'t changed', field.pos);
+				Context.error(why + 'give ${a.name} a type: a reload checks it hasn\'t changed', field.pos);
 			if (t.match(TPath({name: "Rest", pack: ["haxe"] | []})))
-				Context.error("@:hot: not a function with rest arguments", field.pos);
+				Context.error(why + "not a function with rest arguments", field.pos);
 			argTypes.push((a.opt ? "?" : "") + t.toString());
 		}
 		var ret = f.ret;
 		if (ret == null) {
 			if (returnsValue(f.expr))
-				Context.error("@:hot: give it a return type: a reload checks it hasn't changed", field.pos);
+				Context.error(why + "give it a return type: a reload checks it hasn't changed", field.pos);
 			ret = macro:Void;
 		}
 		var sig = "(" + argTypes.join(", ") + ") -> " + ret.toString();
@@ -1025,6 +1142,9 @@ typedef Config = {
 
 	/** the project's classes outside the reloaded code: a reload starts their plain statics over (`__hot_reset__`) **/
 	var resetClasses:Array<String>;
+
+	/** the static functions the main class calls, `game.Game.update`, which the build marked `@:hot`: a reload's build marks the same **/
+	var entries:Array<String>;
 
 	/** the main class's file, which isn't reloaded **/
 	var mainFile:String;

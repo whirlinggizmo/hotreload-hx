@@ -314,6 +314,7 @@ class Reloader {
 			"-D", "hotreload_dirs=" + config.dirs.join("|"),
 			"-D", "hotreload_main=" + config.mainClass,
 			"-D", "dll_import=" + importInfo,
+		]).concat(config.entries.length == 0 ? [] : ["-D", "hotreload_entries=" + config.entries.join("|")]).concat([
 			"--cppia", out
 		]).concat(config.roots);
 		// the changed files through a file, whose path (a define) is the same each build: a

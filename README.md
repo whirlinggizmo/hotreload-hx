@@ -105,20 +105,25 @@ cycles.
 Natively, code compiled before a reload keeps calling what it was compiled with: the main
 class, which is compiled once, and a closure made before the reload, whose module stays
 loaded. A `@:hot` static function is called through the reloader instead, so a call from
-anywhere reaches the newest version:
+anywhere reaches the newest version.
+
+The build marks the static functions the main class calls itself, so the usual entry points
+need nothing written:
 
 ```haxe
 class Game {
-	public static function init() { ... }       // called once, before any reload
-	@:hot public static function tick() { ... } // called every frame: reaches the new code
+	public static function init() { ... }   // called by the main class: @:hot, by the build
+	public static function tick() { ... }   // the same, every frame: reaches the new code
 }
 ```
 
-Only functions that old code calls after a reload need it: what the main class calls, and
-what a callback calls. Anything only the current code calls is an ordinary function. A
-`@:hot` function's types must be written out (or come from a default value); with neither, a
-function that returns nothing is `Void`. On JS every call by name reaches the new code, so
-`@:hot` on a function changes nothing there, and the same code works on both.
+You write `@:hot` on a function a callback calls (below). Anything only the current code
+calls is an ordinary function. A `@:hot` function's types must be written out (or come from
+a default value); with neither, a function that returns nothing is `Void`, and the build
+says which function it means when it was its own mark. A call the build can't see, through
+an import alias, is warned about: mark that function yourself. On JS every call by name
+reaches the new code, so `@:hot` on a function changes nothing there, and the same code
+works on both.
 
 ### Callbacks
 
@@ -209,10 +214,10 @@ class Main {
 package game;
 
 class Game {
-	@:hot static var score = 0;
+	@:hot static var score = 0;             // survives a reload
 
-	public static function init() { ... }
-	@:hot public static function tick() { ... }
+	public static function init() { ... }  // the main class calls these: @:hot, by the build
+	public static function tick() { ... }
 }
 ```
 
@@ -486,7 +491,7 @@ both.
 | -------------------------------------------------- | ----------------------------------------- | ------------------------------------- |
 | An edit to the main class, or to your code outside the directories native reloads | needs a restart | runs                           |
 | A `@:hot` function's signature changes             | needs a restart                           | reloads                               |
-| The main class calls reloaded code                 | the new code only through `@:hot` functions | always the new code                 |
+| The main class calls reloaded code                 | the new code through `@:hot` functions (marked by the build) | always the new code |
 | A carried object                                   | copied to the new class                   | the same object, given the new class  |
 | An object held only from outside the `@:hot` statics | keeps its old code                      | runs the new code                     |
 | A closure made before a reload                     | its own code; the new through `@:hot` functions | its own code; the new for what it calls |
