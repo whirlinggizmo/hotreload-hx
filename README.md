@@ -254,39 +254,7 @@ To use your own server (your editor's, say), pass `-D hotreload_compilation_serv
 or `host:port`; to build without one, `-D hotreload_no_compilation_server`. The server
 stops when the application does.
 
-### Debugging
-
-Debug on JS when you can. Reloaded JS code runs at full speed, and the browser's DevTools or
-VS Code's JavaScript debugger work as they do for any Haxe JS build. Build with `-debug` for
-source maps and set breakpoints in the `.hx` files. Each reloaded bundle has its own source
-map, so a breakpoint also hits in the new code after a reload.
-
-#### hxcpp
-
-Reloading works with stock hxcpp (tested with haxelib's 4.3.2), but breakpoints in the
-reloaded code don't: hxcpp 4.x doesn't tell the debugger when a cppia module loads, so
-breakpoints never bind, and inspecting variables crashes in functions with arguments.
-Forks of hxcpp and hxcpp-debugger fix this; the hxcpp fork is upstream's git master
-(v4.3.171) plus the fixes. With them, breakpoints hit in reloaded code and stay on their
-lines after a reload. It's much slower than JS, though: breakpoints only fire in
-interpreted cppia.
-
-```bash
-haxelib git hxcpp https://github.com/robknopf/hxcpp
-haxelib git hxcpp-debug-server https://github.com/robknopf/hxcpp-debugger master hxcpp-debug-server
-code --install-extension hxcpp-debugger-<version>.vsix   # from the root of robknopf/hxcpp-debugger
-```
-
-If the git hxcpp doesn't build its build tool on first use, run `haxe compile.hxml` in its
-`tools/hxcpp/`.
-
-A hot build to debug adds `-debug` and `-lib hxcpp-debug-server`, as `examples/hello`'s
-`build hot` tasks and `Hot (hxcpp)` launch configurations do. In a `-debug` build, modules
-run interpreted rather than through cppia's JIT (up to 56× slower than native). The
-extension uses port 6972, so a program left running from an earlier session can stop a new
-one from starting.
-
-## How a reload works
+## How an hxcpp reload works
 
 Everything happens in `reloader.update()`. A few times a second it checks the reloaded
 code's sources. Once a change has settled, it builds the module in the background while the
@@ -348,6 +316,40 @@ reloader.assetsChanged = urls -> for (url in urls) assets.reload(url);
 
 `--reload-define <name[=value]>` adds a define to reload builds only, for something the
 first build makes and reloads don't need (a native host the page loads once, say).
+
+## Debugging
+
+### JS
+
+Debug on JS when you can. Reloaded JS code runs at full speed, and the browser's DevTools or
+VS Code's JavaScript debugger work as they do for any Haxe JS build. Build with `-debug` for
+source maps and set breakpoints in the `.hx` files. Each reloaded bundle has its own source
+map, so a breakpoint also hits in the new code after a reload.
+
+### hxcpp
+
+Reloading works with stock hxcpp (tested with haxelib's 4.3.2), but breakpoints in the
+reloaded code don't: hxcpp 4.x doesn't tell the debugger when a cppia module loads, so
+breakpoints never bind, and inspecting variables crashes in functions with arguments.
+Forks of hxcpp and hxcpp-debugger fix this; the hxcpp fork is upstream's git master
+(v4.3.171) plus the fixes. With them, breakpoints hit in reloaded code and stay on their
+lines after a reload. It's much slower than JS, though: breakpoints only fire in
+interpreted cppia.
+
+```bash
+haxelib git hxcpp https://github.com/robknopf/hxcpp
+haxelib git hxcpp-debug-server https://github.com/robknopf/hxcpp-debugger master hxcpp-debug-server
+code --install-extension hxcpp-debugger-<version>.vsix   # from the root of robknopf/hxcpp-debugger
+```
+
+If the git hxcpp doesn't build its build tool on first use, run `haxe compile.hxml` in its
+`tools/hxcpp/`.
+
+A hot build to debug adds `-debug` and `-lib hxcpp-debug-server`, as `examples/hello`'s
+`build hot` tasks and `Hot (hxcpp)` launch configurations do. In a `-debug` build, modules
+run interpreted rather than through cppia's JIT (up to 56× slower than native). The
+extension uses port 6972, so a program left running from an earlier session can stop a new
+one from starting.
 
 ## Limits
 
