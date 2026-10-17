@@ -1,0 +1,4 @@
+# the page's build: web/hello.js, for web/index.html. `haxe web.hxml` serves it hot;
+# built on its own, it's the release web build, with no hot reload
+common.hxml
+--js web/hello.js

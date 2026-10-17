@@ -177,7 +177,7 @@ reloaded code through its class, as above, to reach the new version.
 - hxcpp (stock works, 4.3.2 or later) and a C++ toolchain (gcc or clang; MSVC or MinGW on
   Windows)
 - `haxe` on the `PATH` while the application runs, since it builds each reload
-- To debug reloaded code: forks of hxcpp and hxcpp-debugger (see
+- To debug reloaded code: forks of hxcpp and hxcpp-debugger can be used to set breakpoints (see
   [Debugging native code](#debugging-native-code))
 
 ### Setting up
@@ -205,7 +205,7 @@ package game;
 class Game {
 	@:hot static var score = 0;             // survives a reload
 
-	public static function init() { ... }  // the main class calls these: @:hot, by the build
+	public static function init() { ... }  // the main class calls these: the build marks them @:hot
 	public static function tick() { ... }
 }
 ```
@@ -341,6 +341,10 @@ Forks of hxcpp and hxcpp-debugger fix this; the hxcpp fork is upstream's git mas
 (v4.3.171) plus the fixes. With them, breakpoints hit in reloaded code and stay on their
 lines after a reload. It's much slower than JS, though: breakpoints only fire in
 interpreted cppia. Debug on JS when you can.
+
+Upstream hxcpp has the hook for debugging cppia, but compiles it only for Haxe 5
+(`HXCPP_API_LEVEL >= 500`), and still reads `this` from the wrong slot in functions with
+arguments. Neither has been tried with this library on Haxe 5.
 
 ```bash
 haxelib git hxcpp https://github.com/robknopf/hxcpp
