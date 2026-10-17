@@ -343,8 +343,10 @@ lines after a reload. It's much slower than JS, though: breakpoints only fire in
 interpreted cppia. Debug on JS when you can.
 
 Upstream hxcpp has the hook for debugging cppia, but compiles it only for Haxe 5
-(`HXCPP_API_LEVEL >= 500`), and still reads `this` from the wrong slot in functions with
-arguments. Neither has been tried with this library on Haxe 5.
+(`HXCPP_API_LEVEL >= 500`), and reads `this` from the wrong slot in functions with
+arguments; the fix for that is upstream as
+[hxcpp#1426](https://github.com/HaxeFoundation/hxcpp/pull/1426). Neither has been tried
+with this library on Haxe 5.
 
 ```bash
 haxelib git hxcpp https://github.com/robknopf/hxcpp
