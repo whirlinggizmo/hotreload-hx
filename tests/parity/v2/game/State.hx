@@ -7,6 +7,12 @@ class State {
 	@:hot public static var service(default, null):String;
 
 	@:hot static var kept = 0;
+
+	// a computed property: no storage, so no value to keep or to start over from
+	public static var doubled(get, never):Int;
+
+	static function get_doubled():Int
+		return kept * 2;
 	static var plain = 2;
 	@:hot static var widened:Float = 0;
 	@:hot static var label = "seven";
@@ -31,6 +37,6 @@ class State {
 	}
 
 	public static function report():Void {
-		Main.say('report v2 kept=$kept plain=$plain widened=$widened label=$label added=$added service=$service outside=${Outside.count},${Outside.tag},${Outside.n},${Outside.list.length} main=${Main.count} loaded=$loaded');
+		Main.say('report v2 kept=$kept doubled=$doubled plain=$plain widened=$widened label=$label added=$added service=$service outside=${Outside.count},${Outside.tag},${Outside.n},${Outside.list.length} main=${Main.count} loaded=$loaded');
 	}
 }

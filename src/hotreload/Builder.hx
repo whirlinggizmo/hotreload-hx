@@ -762,7 +762,9 @@ class Builder {
 				switch (field.kind) {
 					case FVar(t, e) | FProp("default", _, t, e) if (hot):
 						types.push({field: field.name, expr: macro $v{hotType(field, t, e).sig}});
-					case FVar(t, e) | FProp(_, _, t, e):
+					// (a property with no storage, `(get, never)`, holds no value: nothing to compare,
+					// and no first value to give it: Haxe refuses one)
+					case FVar(t, e) | FProp(_, _, t, e) if (hasStorage(field)):
 						var sig = if (t != null) t.toString() else if (e != null) try Context.typeof(e).toString() catch (_) null else null;
 						if (sig != null)
 							types.push({field: field.name, expr: macro $v{sig}});
@@ -938,6 +940,19 @@ class Builder {
 					case TAbstract(_.get() => a, _) if (a.pack.length == 0 && a.name == "Bool"): macro cast false;
 					default: macro null;
 				}
+		}
+	}
+
+	/**
+		whether a var or property holds a value: a var, or a property with `default` or `null`
+		on either side, or `@:isVar`; not `(get, never)` or `(get, set)`, which are their accessors
+	**/
+	static function hasStorage(field:Field):Bool {
+		return switch (field.kind) {
+			case FVar(_, _): true;
+			case FProp(get, set, _, _):
+				get == "default" || get == "null" || set == "default" || set == "null" || field.meta.exists(m -> m.name == ":isVar");
+			default: false;
 		}
 	}
 

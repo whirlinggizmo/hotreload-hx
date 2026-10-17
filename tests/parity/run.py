@@ -9,6 +9,7 @@ statics:
 - a @:hot static whose type changed is kept when it's still the same kind of value
   (Int to Float), and starts over when not (Int to String), with the same message;
 - a @:hot (default, null) static with no first value, set by the main class, is kept;
+- a computed static property, (get, never), builds and reads its getter (it has no value to keep);
 - the main class's statics are kept;
 - a completion made in the reloaded code before a reload (a lambda calling a @:hot function
   by name), held by the main class, reaches the new code after it;
@@ -33,10 +34,10 @@ OUTSIDE = os.path.join(HERE, "src", "Outside.hx")
 # outside=<count>,<tag>,<n>,<list.length>: the main class sets them to 5,t,5,1; a reload
 # starts them over, though Outside isn't in the native build's module
 EXPECTED = {
-    "v1": "report v1 kept=5 plain=5 widened=3 label=7 service=on outside=5,t,5,1 main=5 loaded=v1:7",
-    "v2": "report v2 kept=5 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v2:8",
+    "v1": "report v1 kept=5 doubled=10 plain=5 widened=3 label=7 service=on outside=5,t,5,1 main=5 loaded=v1:7",
+    "v2": "report v2 kept=5 doubled=10 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v2:8",
     # the completion v2 made (by a module, natively) reaches v3's onLoaded
-    "v3": "report v3 kept=5 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v3:8",
+    "v3": "report v3 kept=5 doubled=10 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v3:8",
     "types": [
         "hotreload: game.State.label's type changed (Int to String); started over from its first value",
         "hotreload: game.State.widened's type changed (Int to Float); carried over what still fits",
