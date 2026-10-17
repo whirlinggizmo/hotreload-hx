@@ -1,26 +1,25 @@
 # hotreload-hx
 
-Hot reload for Haxe applications. hotreload rebuilds a running application's code when
-you save a change, in the background, and swaps the new code in without stopping the
-application and without losing its state. It is for applications with a loop, such as a
-game or a tool with a window, where a restart would cost you the window, the loaded
-assets and where you were. Debug, release and web builds compile the same code in, with
-no reloading and no cost.
+Hot reload for Haxe applications. When you save a change, hotreload rebuilds the code in
+the background and swaps it into the running application, keeping its state. It's for
+applications with a loop, such as a game or a windowed tool, where a restart would cost you
+the window, the loaded assets and where you were. Debug, release and web builds compile the
+same code with no reloading and no cost.
 
-It's the Haxe side of [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim), and
-works the same way. On hxcpp, the reloaded code is built as a cppia module and run by the
-executable's cppia host. On JS (a page, or node), the whole bundle is rebuilt and the
-running one takes on its classes: see [JavaScript](#javascript).
+It's the Haxe side of [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim). On
+hxcpp, the reloaded code is built as a cppia module and run by the executable's cppia host.
+On JS, the whole bundle is rebuilt and the running page takes on its classes (see
+[JavaScript](#javascript)).
 
 ## Requirements
 
-- **Haxe 4.3+**
-- **hxcpp**, and what it needs to build (gcc or clang on Linux and macOS, MSVC or MinGW on
+- Haxe 4.3+
+- hxcpp (stock works, 4.3.2 or later) and a C++ toolchain (gcc or clang; MSVC or MinGW on
   Windows)
-- `haxe` on the `PATH` while the application runs: it builds each reload
-- To debug the reloaded code: forks of hxcpp and hxcpp-debugger (see Debugging)
+- `haxe` on the `PATH` while the application runs, since it builds each reload
+- To debug reloaded hxcpp code: forks of hxcpp and hxcpp-debugger (see [Debugging](#debugging))
 
-Note that only Linux is tested so far.
+Only Linux is tested so far.
 
 ## Install
 
@@ -28,14 +27,13 @@ Note that only Linux is tested so far.
 haxelib git hotreload-hx https://github.com/whirlinggizmo/hotreload-hx
 ```
 
-or, from a clone, `haxelib dev hotreload-hx <the clone's directory>`.
+or, from a clone, `haxelib dev hotreload-hx <clone>`.
 
-## An application that hot reloads
+## Quick start
 
-An application that hot reloads has two parts: a main class, which is compiled into the
-executable and never reloaded, and the classes it calls into, which are reloaded.
-
-The main class creates the reloader and calls `reloader.update()` in its loop:
+An application has a main class, compiled into the executable and never reloaded, and the
+classes it calls into, which are reloaded. The main class calls `reloader.update()` in its
+loop:
 
 ```haxe
 // src/Main.hx
@@ -44,16 +42,15 @@ class Main {
 		var reloader = new hotreload.Reloader();
 		Game.init();
 		while (true) {
-			reloader.update(); // pumps the file watcher, module builder, and reloader
+			reloader.update(); // watches, builds and swaps
 			Game.tick();
 		}
 	}
 }
 ```
 
-The reloaded classes mark what a reload has to know about. A `@:hot` static var is kept
-across reloads, and a `@:hot` static function is one the main class calls, so that its
-calls reach the new code:
+The reloaded classes mark what a reload needs to know: a `@:hot` static var keeps its value,
+and a `@:hot` static function is one the main class calls, so its calls reach the new code:
 
 ```haxe
 // src/Game.hx
@@ -65,7 +62,7 @@ class Game {
 }
 ```
 
-A hot build is an ordinary hxcpp build with hotreload and `-D hotreload`:
+A hot build is an ordinary hxcpp build with `-D hotreload`:
 
 ```hxml
 # hot.hxml
@@ -76,27 +73,24 @@ A hot build is an ordinary hxcpp build with hotreload and `-D hotreload`:
 --cpp out/hot
 ```
 
-While it runs, every change you save to `src/Game.hx`, or to anything beside it, is built
-as a cppia module in the background and swapped in at the next `update()`. `score` keeps
-its value, and the main class's `Game.tick()` calls the new `tick`.
+While it runs, each save to `src/Game.hx` (or anything beside it) is built in the
+background and swapped in at the next `update()`. `score` keeps its value, and `Game.tick()`
+calls the new `tick`.
 
-The reloaded code is found from the metadata: every class with a `@:hot` static or a reload
-hook in it, and every class in the same directories as those, and below them, except the
-main class. Note that a class from somewhere else (a library, an engine) is compiled into
-the executable, and a change to it requires a restart, as a change to the main class does.
+The reloaded code is every class with a `@:hot` static or a reload hook, plus every class in
+the same directories and below, except the main class. Code from elsewhere (a library, an
+engine) is compiled into the executable; changing it, or the main class, needs a restart.
 
 ## Trying it
 
-`examples/hello` is a small console application that hot reloads. From a clone of this
-repo:
+`examples/hello` is a small console application:
 
 ```bash
 cd examples/hello
 haxe hot.hxml
 ```
 
-It prints a greeting a few times a second. Open `src/Hello.hx`, change the greeting and
-save, and the next greeting is the new one:
+It prints a greeting a few times a second. Change the greeting in `src/Hello.hx` and save:
 
 ```
 Hello, world! (ticks: 12, since the last reload: 12)
@@ -106,30 +100,24 @@ hotreload: reloaded (main_1.cppia)
 Howdy, world! (ticks: 16, since the last reload: 1)
 ```
 
-`ticks` is a hot static, so it keeps counting through the reload. `sinceReload` is a
-plain static, so it starts over.
-
-The greeting's first word is an asset, `assets/greeting.txt`. Change it and save, and the
-next greeting uses it, with nothing rebuilt:
+`ticks` is a hot static, so it keeps counting; `sinceReload` is a plain static, so it starts
+over. The greeting's first word comes from `assets/greeting.txt`; edit it and the next
+greeting uses it, with nothing rebuilt:
 
 ```
 hotreload: assets/greeting.txt changed
 hello: the greeting is now "Howdy"
-Howdy, world! (ticks: 20, since the last reload: 5)
 ```
 
-It has a debug and a release build too, and `.vscode/` tasks and launch configurations
-for them, and needs nothing but hotreload-hx. For a whole program built with it,
-[HeliX](https://github.com/whirlinggizmo/helix), a Haxe game framework, develops through
-the dev server: its browser examples reload their code, and their assets in place, as
-they're saved.
+It also has debug and release builds, with VS Code tasks and launch configurations. For a
+larger program, [HeliX](https://github.com/whirlinggizmo/helix), a Haxe game framework,
+develops with hotreload-hx.
 
 ## Usage
 
 ### State
 
-A `@:hot` static var keeps its value across reloads. A plain static starts over with each
-reload:
+A `@:hot` static var keeps its value across reloads; a plain static starts over:
 
 ```haxe
 @:hot static var score = 0;
@@ -137,162 +125,112 @@ reload:
 static var frameCount = 0; // starts over
 ```
 
-The first value (`= 0` above) is only used once, when the static is created. As such, an
-edit to the first value changes nothing while the application runs. A kept value is
-changed by assigning it, in an `@:afterHotReload` hook, say:
-
-```haxe
-@:afterHotReload static function reset() {
-	score = 0;
-}
-```
-
-When a reload changes a hot static's type, its value is carried over when it's still the
-same kind of value (a number, a bool, a string, an object), and started over from the
-first value when not.
+The initial value is only used when the static is first created, so editing it changes
+nothing while the application runs. To change a kept value, assign it, for example in an
+`@:afterHotReload` hook. If a reload changes a hot static's type, its value is kept when
+it's still the same kind (number, bool, string, object), and reset otherwise.
 
 ### Objects
 
-An object keeps the class it was made with, and that class's methods. So on each reload,
-the objects of the reloaded classes that the hot statics hold are copied into the new
-code's classes: field by field, by name. A field that's gone is dropped, and a new one
-starts from its initializer, as it would in a new object:
+On each reload, objects of the reloaded classes reachable from the hot statics are moved to
+the new classes, field by field by name. A removed field is dropped, and a new one starts
+from its initializer:
 
 ```haxe
 class Enemy {
 	public var hp:Int;       // kept
 	public var shield = 10;  // new: starts at 10
-	...
 }
 ```
 
-hotreload walks from the hot statics through arrays, maps, anonymous structures, the
-reloaded classes' fields and the reloaded enums' values (matched by constructor name).
-The objects are copied as a graph, so shared objects stay shared and cycles stay cycles,
-and arrays, maps and structures are updated in place. Note that it doesn't walk into the
-executable's own classes' objects (an engine's scene, say), and that an object held
-anywhere else, such as by the main class, keeps running the code it was made with.
+hotreload walks arrays, maps, anonymous structures, reloaded classes' fields and reloaded
+enums' values (matched by constructor name). Shared objects stay shared and cycles stay
+cycles. It doesn't walk into the executable's own classes (an engine's scene, say), and an
+object held only from elsewhere, such as the main class, keeps its old code.
 
 ### Functions the main class calls
 
-The main class is compiled once, so a call from it reaches the version of the function it
-was built with, forever. A `@:hot` static function is called through the reloader
-instead, so a call from the main class reaches the newest code:
+The main class is compiled once, so its calls reach the code it was built with. A `@:hot`
+static function is called through the reloader instead, so the main class reaches the
+newest version. Only functions the main class calls after a reload can have happened need
+it; `init`, or anything only reloaded code calls, is an ordinary function.
 
-```haxe
-// src/Game.hx
-@:hot public static function tick() { ... }
-
-// src/Main.hx
-Game.tick(); // after a reload, this calls the new tick
-```
-
-Only the functions the main class calls after a reload could have happened need it. A
-function the main class only calls at the start (like `init`), or a function only the
-reloaded classes call, is an ordinary function.
-
-Note that a `@:hot` function's parameters and result can't change while the application
-runs. A reload that changes them is refused with a message, and the old code keeps
-running until you restart. The same goes for adding a `@:hot` function or renaming one.
-Its parameter and return types are written out, or come from a default value; with
+A `@:hot` function's signature can't change while the application runs: such a reload is
+refused with a message, and the old code keeps running until a restart. The same goes for
+adding or renaming one. Its types must be written out (or come from a default value); with
 neither, a function that returns nothing is `Void`.
 
-### Doing something around a reload
+### Reload hooks
 
-A reloaded class can run something just before a reload, on the old code, and just after,
-on the new code:
+A reloaded class can run code just before a reload (on the old code) and just after (on the
+new):
 
 ```haxe
 @:beforeHotReload static function saveScratch() { ... }
 @:afterHotReload static function rebuildCaches() { ... }
 ```
 
-These hooks are optional. They're static functions with no parameters.
-
-The main class is told about reloads through the reloader's two callbacks, since the
-metadata is for the reloaded classes only:
+The main class uses the reloader's callbacks instead:
 
 ```haxe
 reloader.beforeReload = () -> trace("reloading");
 reloader.afterReload = () -> trace("reloaded");
 ```
 
-A reload runs these in order: the old code's `@:beforeHotReload` hooks, the main class's
-`beforeReload`, the swap (the new code's statics are made, and the hot statics carried
-over), the new code's `@:afterHotReload` hooks, and the main class's `afterReload`.
+The order is: old `@:beforeHotReload` hooks, `beforeReload`, the swap, new
+`@:afterHotReload` hooks, `afterReload`.
 
-### Callbacks that outlive a reload
-
-A replaced module stays loaded, so a callback that its code handed out before a reload
-(to an asset loader, say) still works when it fires. Note that it runs the code it came
-from, not the new code. It reads and writes the same hot statics as the new code, since
-each hot static has one storage the executable keeps.
+A replaced module stays loaded, so a callback handed out before a reload (to an asset
+loader, say) still works when it fires. It runs its old code, but on the same hot statics.
 
 ### Assets
 
-A saved asset can be told to the program too, so that it loads it again without a
-restart. The reloader watches the directories it's given, and once a save has settled,
-gives `assetsChanged` the paths that changed, each as the program loads it: the
-directory as it was given, then the rest (`assets/sounds/fire.ogg`):
+The reloader can also watch asset directories and tell the program what changed, so it can
+load it again:
 
 ```haxe
 reloader.watchAssets("assets");
-reloader.assetsChanged = paths -> Game.onAssetsChanged(paths); // through the class: the new code
+reloader.assetsChanged = paths -> Game.onAssetsChanged(paths);
 ```
 
-Nothing is rebuilt: what to load again, and how, is the program's. A deleted file is told
-too. Hidden files (an editor's `.swp`) aren't watched, and the temporary file an editor
-saves through, made and gone within the save, isn't told. Like a swap, it happens in
-`update`, never in the middle of a frame. The callback is the main class's, so call a
-reloaded class through the class, as above, for it to reach the new code after a reload; a
-function kept from before a reload runs the code it came from. On JS the same callback
-gets URLs, from the dev server, and `watchAssets` does nothing: see
-[JavaScript](#javascript).
+Paths start with the directory as given (`assets/sounds/fire.ogg`). Nothing is rebuilt;
+reloading the asset is up to the program. Deleted files are reported too; hidden files and
+an editor's temporary save files aren't. The callback runs in `update()`. It belongs to the
+main class, so call reloaded code through its class, as above, to reach the new version.
+On JS the dev server reports URLs instead (see [JavaScript](#javascript)).
 
 ### Building
 
-`-D hotreload` turns hot reloading on, on a cpp target. hotreload sets what the build
-needs for cppia: `-D scriptable`, `-dce no` and `-D dll_export`. Everything else, the
-command line of each module's build, is taken from the hot build's own.
-
-Without `-D hotreload`, the same sources build one ordinary program with no reloading,
-which is your debug, release and web build. `examples/hello` has one of each:
+`-D hotreload` turns hot reloading on for the cpp target and sets what cppia needs:
+`-D scriptable`, `-dce no` and `-D dll_export`. Without it, the same sources build an
+ordinary program, which is your debug, release and web build:
 
 ```bash
-haxe hot.hxml       # hot: builds out/hot, and runs it
+haxe hot.hxml       # hot: builds out/hot and runs it
 haxe debug.hxml     # debug, no hot reload
 haxe release.hxml   # release
 ```
 
-Each module is built with its own `haxe`, from the hot build's directory, with the hot
-build's command line, but its target, main class and `--cmd`. As such a hot build is one
-build: an hxml with `--next` or `--each` is refused. A module's build has
-`-D hotreload_library`, for a define only it needs.
-
-The modules go to a `hotreload/` directory in the hot build's `--cpp` directory
-(`out/hot/hotreload/` above), with the list of the executable's classes the modules are
-compiled against.
+Each module is built by its own `haxe`, with the hot build's command line except for the
+target, main class and `--cmd`, plus `-D hotreload_library`. So a hot build must be a
+single build: `--next` and `--each` are refused. Modules go to `hotreload/` in the hot
+build's `--cpp` directory.
 
 ### Native bindings
 
-cppia can't run an extern call or `__cpp__`, and a binding of a C library is made of
-those. So **a reload's build doesn't inline library code**: every `inline` function
-outside the reloaded directories (and outside the standard library) is compiled as a
-call to the executable's copy of it, and the C++ runs there. hotreload does this
-itself, in every module build, with nothing to turn on; what stays inline is what has
-to (an `extern inline` function, an abstract's constructor, a function that assigns an
-abstract's `this`). A library needs two things for it to work:
+cppia can't run an extern call or `__cpp__`, which is what a C binding is made of. So a
+module build doesn't inline library code: every `inline` function outside the reloaded
+directories and the standard library becomes a call to the executable's compiled copy, where
+the C++ runs. This is automatic. A binding needs two things for it to work:
 
 - **C types only in private classes.** `-D scriptable` makes a cppia wrapper for every
-  static of a public class, including its private ones, and a wrapper for a C pointer,
-  struct, enum or function pointer doesn't compile. hotreload makes such an `inline`
-  function `extern inline`, which has no wrapper (cppia could never have called it);
-  a non-inline one (a C callback, say) has to be in a private class, which gets none.
-- **Compiled copies of what the reloaded code calls.** An `extern inline` function has
-  none, so its body is inlined into the module, and if that's C, the reload fails to
-  load with `Unknown static call to ...`. Haxe requires `overload` functions to be
-  `extern inline`, so an overload can't make the C call itself: it calls a plain
-  `inline` function that does (which the native build inlines all the same):
+  static of a public class, and a wrapper for a C pointer, struct, enum or function pointer
+  doesn't compile. hotreload makes such `inline` functions `extern inline` (no wrapper); a
+  non-inline one, such as a C callback, must be in a private class.
+- **Compiled copies of what the reloaded code calls.** An `extern inline` function has no
+  compiled copy, so if its body is C, the module fails to load with
+  `Unknown static call to ...`. Haxe requires `overload` functions to be `extern inline`, so
+  an overload should call a plain `inline` function that makes the C call:
 
   ```haxe
   public static overload extern inline function setPosition(m:Model, v:Vec3):Bool
@@ -300,37 +238,38 @@ abstract's `this`). A library needs two things for it to work:
   public static overload extern inline function setPosition(m:Model, x:Float, y:Float, z:Float):Bool
   	return setPosition3(m, x, y, z);
   static inline function setPosition3(m:Model, x:Float, y:Float, z:Float):Bool
-  	return Raw.wgr_model_set_position(m, x, y, z);
+  	return Native.model_set_position(m, x, y, z);
   ```
 
-wgrender's Haxe binding was written this way, all inline wrappers over externs, and
-reloaded at full speed.
+A binding written as inline wrappers over externs reloads at full speed.
 
 ### The compilation server
 
-The reloader starts a Haxe compilation server (`haxe --wait`, on a free local port) when
-it's made, and builds each module through it (`--connect`). The server keeps what it has
-parsed and typed between builds, so a reload rebuilds only the files that changed and
-what depends on them; a library's code, or the standard library's, is typed once. The
-first build runs as the application starts, and isn't swapped in, so that the first
-reload is quick too. In `examples/hello`, a module builds in about 0.1 s through the
-server, and 0.3 s without it.
+The reloader starts a Haxe compilation server (`haxe --wait` on a free local port) and
+builds each module through it, so a reload only retypes what changed. The first build runs
+at startup and isn't swapped in, so the first reload is quick too. In `examples/hello` a
+module builds in about 0.1 s with the server and 0.3 s without.
 
-The server stops when the application does. To use a compilation server of your own
-instead (one your editor runs, say), name its port with
-`-D hotreload_compilation_server=<port>`, or `host:port`. To build without one,
-`-D hotreload_no_compilation_server`.
-
-Note that a compilation server notices a changed file by its time, in whole seconds, so on
-its own it would miss a second save in the same second as the last build's. The reloader
-tells it which files changed since the last build started.
+To use your own server (your editor's, say), pass `-D hotreload_compilation_server=<port>`
+or `host:port`; to build without one, `-D hotreload_no_compilation_server`. The server
+stops when the application does.
 
 ### Debugging
 
-Breakpoints in the reloaded code, which runs in cppia, need forks of hxcpp and of
-hxcpp-debugger, the VS Code extension: their fixes for debugging cppia aren't upstream
-yet. With them, breakpoints hit in the reloaded code and stay on their lines after a
-reload.
+Debug on JS when you can. Reloaded JS code runs at full speed, and the browser's DevTools or
+VS Code's JavaScript debugger work as they do for any Haxe JS build. Build with `-debug` for
+source maps and set breakpoints in the `.hx` files. Each reloaded bundle has its own source
+map, so a breakpoint also hits in the new code after a reload.
+
+#### hxcpp
+
+Reloading works with stock hxcpp (tested with haxelib's 4.3.2), but breakpoints in the
+reloaded code don't: hxcpp 4.x doesn't tell the debugger when a cppia module loads, so
+breakpoints never bind, and inspecting variables crashes in functions with arguments.
+Forks of hxcpp and hxcpp-debugger fix this; the hxcpp fork is upstream's git master
+(v4.3.171) plus the fixes. With them, breakpoints hit in reloaded code and stay on their
+lines after a reload. It's much slower than JS, though: breakpoints only fire in
+interpreted cppia.
 
 ```bash
 haxelib git hxcpp https://github.com/robknopf/hxcpp
@@ -338,162 +277,119 @@ haxelib git hxcpp-debug-server https://github.com/robknopf/hxcpp-debugger master
 code --install-extension hxcpp-debugger-<version>.vsix   # from the root of robknopf/hxcpp-debugger
 ```
 
-The first is hxcpp itself, the second the debug server the program links (a directory of
-the debugger's repo), and the third the VS Code extension, whose `.vsix` is in that repo.
-A git hxcpp builds its own build tool on first use; if it doesn't, run `haxe compile.hxml`
-in its `tools/hxcpp/`. To work on the forks themselves, clone them and use `haxelib dev`
-instead (`haxelib dev hxcpp-debug-server <the clone>/hxcpp-debug-server`).
+If the git hxcpp doesn't build its build tool on first use, run `haxe compile.hxml` in its
+`tools/hxcpp/`.
 
-A hot build to debug has `-debug` and `-lib hxcpp-debug-server`, as `examples/hello`'s `build
-hot` tasks and `Hot (hxcpp)` launch configurations do. In a `-debug` build the modules run
-interpreted, not through cppia's JIT, since breakpoints only fire there. As such it's the
-slowest way to run reloaded code. The extension talks to the program on port 6972, so a
-program left running from an earlier session can make a new debugging session fail to
-start; the extension says so.
+A hot build to debug adds `-debug` and `-lib hxcpp-debug-server`, as `examples/hello`'s
+`build hot` tasks and `Hot (hxcpp)` launch configurations do. In a `-debug` build, modules
+run interpreted rather than through cppia's JIT (up to 56× slower than native). The
+extension uses port 6972, so a program left running from an earlier session can stop a new
+one from starting.
 
-## What happens on a reload
+## How a reload works
 
-Everything happens in `reloader.update()`. A few times a second, `update()` checks the
-sources in the reloaded code's directories, and below them (except the main class's), for
-changes. Once they've changed and then stopped changing, it starts a build of the reloaded
-code as one cppia module, in the background, and returns. The old code keeps running in
-the meantime, and any compiler errors go to the terminal. A change during a build starts
-another build when that one is done.
+Everything happens in `reloader.update()`. A few times a second it checks the reloaded
+code's sources. Once a change has settled, it builds the module in the background while the
+old code keeps running; compiler errors go to the terminal. The first `update()` after the
+build checks the hot functions' signatures, runs the hooks, starts the module, carries the
+hot statics over and points the main class's calls at the new code. So a swap never happens
+in the middle of a frame.
 
-The first `update()` after the build finishes swaps the new module in. It checks the hot
-functions' signatures, runs the hooks, starts the module, carries the hot statics over,
-and points the main class's calls at the new code. As such, a swap only ever happens where
-the main class calls `update()`, never in the middle of a frame.
-
-Each reload is a new module (`main_1.cppia`, `main_2.cppia`, ...), which replaces the last
-one's classes. The executable's own compiled copies of the reloaded classes run until the
-first reload; they're renamed (`_hot.Game`), so the modules' classes, under their own
-names, don't collide with them.
-
-A module is read into memory whole, and its file is deleted as soon as it's loaded, so
-however the program stops, even by Ctrl-C, none is left behind. The next run deletes any a
-run left while it was building one.
+Each reload is a new module (`main_1.cppia`, `main_2.cppia`, ...). The executable's own
+copies of the reloaded classes run until the first reload, renamed (`_hot.Game`) so they
+don't collide. Module files are deleted as soon as they're loaded, so none are left behind,
+even after Ctrl-C.
 
 ## JavaScript
 
-On JS, a hot build is served by hotreload's dev server, which rebuilds the bundle when a
-source changes. The page (or a node program) loads each new bundle beside the running one
-and takes on its classes, between two frames. The page's own state stays, and with it
-whatever it made: a wasm engine, the GPU's state, loaded assets, open connections.
+On JS, hotreload's dev server serves the hot build and rebuilds the bundle when a source
+changes. The page (or node program) loads the new bundle beside the running one and takes on
+its classes between two frames. The page keeps everything it made: a wasm engine, GPU state,
+loaded assets, open connections.
 
 ```bash
 haxe -lib hotreload-hx --run hotreload.DevServer [--port 8080] [--mount /url=dir] build.web.hxml
 ```
 
-The build's own arguments (an hxml) follow the options: the dev server adds
-`-lib hotreload-hx` and `-D hotreload`, serves the build's output directory at
-`http://localhost:8080/`, and watches the build's class paths inside its directory.
-`--mount /assets=../assets` serves another directory beside it, with Range requests, which
-an engine streaming its assets uses. A node program asks the dev server at
-`HOTRELOAD_URL` (`http://localhost:8080/__hotreload` by default).
+The dev server adds `-lib hotreload-hx` and `-D hotreload` to the build, serves its output
+directory at `http://localhost:8080/`, and watches its class paths. `--mount /assets=../assets`
+serves another directory, with Range requests. A node program connects to `HOTRELOAD_URL`
+(`http://localhost:8080/__hotreload` by default). `/__hotreload_stop`, from the same
+machine, stops the dev server and its compilation server.
 
-A hot JS build is ES6 output (`-D js-es=6`), since a reload's swap fails on ES5 output.
-`-lib hotreload-hx` sets it (its `extraParams.hxml`), so any build using the library is ES6
-unless told otherwise; a hot build set lower stops with a message. A define given before
-`-lib hotreload-hx` is overridden by it, so ask for more than ES6 after it.
+A hot JS build must be ES6 or later (`-D js-es=6`); `-lib hotreload-hx` sets it, and a hot
+build set lower stops with a message. To ask for a later version, define it after
+`-lib hotreload-hx`.
 
-Nothing to call and nothing to mark: every class reloads, the main class too, and so
-`@:hot` means nothing here (hxcpp code that uses it builds as it is). What a reload does:
+There's nothing to call or mark: every class reloads, including the main class, and `@:hot`
+is ignored. On a reload:
 
-- each static keeps its value, on the new class. One whose type the new code declares
-  differently starts over from its first value, and says so;
-- the objects the statics hold are given the new classes, in place: the same objects, so
-  every reference to them is still good. A field an object doesn't have yet (a new one)
-  starts from its initializer, and an enum value is made again by its constructor's name;
-- the old classes forward to the new ones, so old code still around (an object nothing
-  walked to, a callback that calls through a class) runs the new code, on the same state;
-- a method reference in a static (`onFrame = Guest.frame`) becomes the new code's;
-- the hooks run as on hxcpp: `@:beforeHotReload` on the old code, `@:afterHotReload` on
-  the new.
+- statics keep their values on the new class; one whose declared type changed is reset, with
+  a message;
+- objects the statics hold get the new classes in place, so every reference stays good; new
+  fields start from their initializers, and enum values are rebuilt by constructor name;
+- old classes forward to the new ones, so leftover old code runs the new code on the same
+  state;
+- a method reference in a static (`onFrame = Guest.frame`) points to the new code;
+- `@:beforeHotReload` and `@:afterHotReload` run as on hxcpp.
 
-Saved assets are told to the page too, by URL. The dev server watches the files it serves
-(its output directory and its mounts, but the bundle), and once a save has settled it
-answers `/__hotreload_assets` (a long poll of its own, so an asset never loads a bundle).
-Nothing is rebuilt: the program says what to load again, and how, in a reloader's
-`assetsChanged`, as on hxcpp ([Assets](#assets)), but by URL. `watchAssets` does nothing
-here, since the dev server watches everything it serves, so that one main class builds
-for both:
+Signature changes need no restart, since every caller reloads too. A closure or bound method
+(`obj.method`) made before a reload keeps its old code.
+
+The dev server also watches the files it serves (except the bundle) and reports saved assets
+by URL to the reloader's `assetsChanged`. `watchAssets` does nothing on JS, so one main
+class works for both targets:
 
 ```haxe
 var reloader = new hotreload.Reloader();
-reloader.watchAssets("assets"); // hxcpp's; on JS, what the dev server serves (--mount)
-reloader.assetsChanged = urls -> for (url in urls) assets.reload(url); // a program's own
+reloader.watchAssets("assets"); // hxcpp; on JS, the dev server watches what it serves
+reloader.assetsChanged = urls -> for (url in urls) assets.reload(url);
 ```
 
-`/__hotreload_stop`, asked from the same machine, stops the dev server, and with it its
-compilation server: a tool that started one can end it cleanly.
-
-A signature change needs no restart, since every caller reloads with it. What keeps the
-code it came from: a closure, or a bound method (`obj.method` as a value), made before the
-reload. Each old bundle's code is freed once nothing refers to it, but the first's, which
-keeps the connection to the dev server.
-
-A reloaded bundle runs as fast as the first, on the same JIT: in node, the benchmark
-`tests/matrix` runs (a math loop and an object loop) took 28 ms and 8 ms before a reload,
-30–37 ms and 7–9 ms after. wgrender's `simple` example, as a guest in a page, reloaded
-0.23–0.25 s after a save (a build takes 44–50 ms through the compilation server; the first
-reload, 0.58 s).
-
-`--reload-define <name[=value]>` gives the reloads' builds a define the first build
-doesn't get: for something the page loads once, which the first build makes and a
-reload's needn't (a native host a guest runs in, say). A reload's build has the first
-build's arguments, then its own, and the later define wins.
+`--reload-define <name[=value]>` adds a define to reload builds only, for something the
+first build makes and reloads don't need (a native host the page loads once, say).
 
 ## Limits
 
-- hxcpp reloads through cppia, and JS through the dev server. A hot build for another
-  target builds without it, with a warning.
-- On JS, a field renamed or removed is gone from carried objects (`undefined` rather than
-  a type's default, since JS has none), and a closure or bound method made before a
-  reload runs its old code.
-- A hot build is bigger and slower to build: `-D scriptable` and `-dce no` keep every
-  class the executable has, whole, for the modules to call.
-- The reloaded code runs in cppia, which is slower than hxcpp's native code: measured at
-  5–13× slower through its JIT, and up to 56× slower interpreted in a `-debug` build. Hot
-  statics are read and written through their storage (as `Dynamic`), and hot functions
-  are called through a variable. The debug and release builds have none of this.
-- New code that uses a class the executable was built without, and which has native parts
-  (an extern), fails to load, with "Bad link". Restart to build it in.
-- A program started again runs the code it was built with, not what's in the sources now,
-  until the next change reloads. Rebuild after editing a stopped program.
-- Old modules aren't freed: old code may still run. Memory grows with each reload, about
-  1.25 MB in wgrender's `simple` example (a `-debug` build). A restart gives it back.
-- A change to the main class, or to a `@:hot` function's signature, requires a restart.
-- A class in the reloaded code with its own `@:native` can't be reloaded.
+- Only hxcpp (through cppia) and JS (through the dev server) reload. Other targets build
+  without it, with a warning.
+- A hot hxcpp build is bigger and slower to build: `-D scriptable` and `-dce no` keep every
+  class whole.
+- Reloaded hxcpp code runs in cppia: 5–13× slower than native through its JIT, and up to
+  56× slower interpreted in a `-debug` build. Debug and release builds have no such cost.
+- New reloaded code that uses an extern class the executable wasn't built with fails to load
+  ("Bad link"). Restart to build it in.
+- A restarted program runs the code it was built with until the next change reloads.
+  Rebuild after editing a stopped program.
+- Old modules aren't freed, since old code may still run, so memory grows a little with each
+  reload until a restart.
+- Changing the main class or a `@:hot` function's signature needs a restart.
+- A reloaded class with its own `@:native` can't be reloaded.
+- On JS, a renamed or removed field is `undefined` on carried objects.
 
 [docs/comparison.md](docs/comparison.md) compares hotreload-hx with hotreload-nim: reload
-times, the speed of reloaded code, and what each can and can't do.
+times, reloaded code's speed, and what each can do.
 
 ## The repo
 
 ```
-haxelib.json             the package: classPath src, -lib hotreload-hx
-extraParams.hxml         --macro hotreload.Builder.init(), which -lib hotreload-hx adds
+haxelib.json             the package: classPath src
+extraParams.hxml         --macro hotreload.Builder.init(), added by -lib hotreload-hx
 src/hotreload/
-  Builder.hx             the hot build: @:hot, the reload hooks, and the executable's
-                         config for rebuilding the reloaded code
-  Reloader.hx            the reloader: watch, rebuild, swap, and tell of saved assets
-  FileWatch.hx           files watched for saves, told once a save has settled (the
-                         reloader's sources and assets, and the dev server's)
-  Slot.hx, Slots.hx      hot statics' storage, which the executable keeps
-  Hooks.hx               the reload hooks, and the executable's @:hot functions
-  Migrate.hx             carrying the hot statics' objects over to the new classes
-  Reloader.js.hx         the JS reloader, which a hot JS build starts by itself
-  JsSwap.hx              JS: loading a new bundle, and making its classes the current ones
-  DevServer.hx           JS: building hot, serving it, and rebuilding on a change
-docs/comparison.md       hotreload-nim and hotreload-hx, measured side by side
-tests/                   `haxe tests/run.hxml`: a smoke test that builds tests/reload/
-                         hot, runs it and edits it while it runs
-tests/matrix/            the capability matrix behind docs/comparison.md, for hxcpp and JS
-tests/scale/             reload time by program size, behind docs/comparison.md, for hxcpp, JS and Nim
-examples/hello/          a console application: src/Main.hx, its main class,
-                         src/Hello.hx, which is reloaded, and assets/greeting.txt, an
-                         asset it reads again when it's saved
+  Builder.hx             the hot build: @:hot, reload hooks, the module build's config
+  Reloader.hx            watching, rebuilding, swapping, and asset changes
+  FileWatch.hx           file watching, shared by the reloader and the dev server
+  Slot.hx, Slots.hx      hot statics' storage, kept by the executable
+  Hooks.hx               reload hooks and @:hot functions
+  Migrate.hx             moving objects to the new classes
+  Reloader.js.hx         the JS reloader
+  JsSwap.hx              JS: loading a new bundle and taking on its classes
+  DevServer.hx           JS: building, serving and rebuilding
+docs/comparison.md       hotreload-nim and hotreload-hx side by side
+tests/                   `haxe tests/run.hxml`: builds tests/reload/ hot and edits it while it runs
+tests/matrix/            the capability matrix behind docs/comparison.md
+tests/scale/             reload time by program size, for hxcpp, JS and Nim
+examples/hello/          a console application with a reloaded class and an asset
 ```
 
 ## License

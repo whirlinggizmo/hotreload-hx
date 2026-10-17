@@ -41,7 +41,7 @@ was measured the same way: wgrender-hx's `simple` as a guest in a headless brows
 | Memory per reload | ~0.2 MB, and a copy of ref-held hot state | ~1.25 MB | not measured (old bundles are collected, but the first) |
 | Files left behind | none | none | none (one bundle, rewritten) |
 | Hot build's program | a 7 MB executable | a 77 MB executable | a bundle, and a wasm host exporting all of wgrender |
-| Debugging reloaded code | gdb/lldb; breakpoints go stale after a reload | the hxcpp/debugger forks; breakpoints stay aligned (interpreted only) | browser devtools or VS Code; not tried across reloads |
+| Debugging reloaded code | gdb/lldb; breakpoints go stale after a reload | the hxcpp/debugger forks; breakpoints stay aligned (interpreted only) | browser devtools or VS Code; breakpoints hit in reloaded code (each bundle has its source map), at full speed |
 | Native code from reloaded code | any C function | only what the executable already compiled | any wgrender call (the hot host exports them all) |
 | Where it runs | Linux tested (macOS in CI; Windows needs MinGW) | Linux tested | a page, or node |
 | Release builds | ordinary, no cost | ordinary, no cost | ordinary, no cost |
@@ -212,14 +212,14 @@ but that call still runs the version from before the reload.
 
 ## Debugging reloaded code
 
-| | hotreload-nim | hotreload-hx |
-| --- | --- | --- |
-| Debugger | gdb or lldb (native) | hxcpp-debugger in VS Code |
-| After a reload | Breakpoints go stale once lines shift; debug the non-hot build instead | Breakpoints stay aligned |
-| Cost | None: native stepping at native speed | Breakpoints only fire in interpreted cppia (`-debug`), the slowest mode |
-| Needs | The standard toolchain | Changes to hxcpp and hxcpp-debugger that aren't upstream yet |
+| | hotreload-nim | hotreload-hx, hxcpp | hotreload-hx, JS |
+| --- | --- | --- | --- |
+| Debugger | gdb or lldb (native) | hxcpp-debugger in VS Code | browser devtools, or VS Code's JavaScript debugger |
+| After a reload | Breakpoints go stale once lines shift; debug the non-hot build instead | Breakpoints stay aligned | Breakpoints hit in the reloaded bundle, through its own source map |
+| Cost | None: native stepping at native speed | Breakpoints only fire in interpreted cppia (`-debug`), the slowest mode | None: the reloaded code runs at full speed |
+| Needs | The standard toolchain | Changes to hxcpp and hxcpp-debugger that aren't upstream yet; stock hxcpp reloads, but its breakpoints don't bind in cppia | `-debug` (source maps) |
 
-Nim's breakpoint behaviour is from its README, not retested here.
+Nim's breakpoint behaviour is from its README, not retested here. The JS row was checked on 2026-10-17 in headless Chromium and node, through the DevTools protocol: a breakpoint set by `.hx` line through the source map, an edit that moved the line, and a hit in the reloaded bundle with the new value.
 
 ## Bugs found
 
