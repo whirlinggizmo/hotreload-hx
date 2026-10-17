@@ -89,6 +89,7 @@ class Builder {
 			libraryMain = Context.definedValue("hotreload_main");
 			Compiler.define("dce", "no");
 			invalidate();
+			Context.onAfterTyping(warnMethodValues);
 		} else if (Context.defined("hotreload") && Context.defined("js")) {
 			mode = Context.defined("hotreload_reload") ? JsReload : Js;
 			invalidate();
@@ -138,6 +139,7 @@ class Builder {
 		Compiler.define("dll_export", buildDir + "/host.info");
 
 		Context.onAfterTyping(types -> {
+			warnMethodValues(types);
 			if (configured)
 				return;
 			configured = true;
@@ -186,6 +188,7 @@ class Builder {
 		findProject(args, cwd);
 		var path = Context.defined("hotreload_config") ? Context.definedValue("hotreload_config") : absolute(cwd, js) + ".hotreload.json";
 		Context.onAfterTyping(types -> {
+			warnMethodValues(types);
 			if (configured)
 				return;
 			configured = true;
@@ -243,6 +246,65 @@ class Builder {
 			return false;
 		var file = fileOf(c.pos);
 		return file != null && file != mainFile && inside(file, projectDirs) && !file.startsWith(stdDir());
+	}
+
+	/** a class of your code, in whichever build: in a reload's build, the project's class paths aren't known, and the reloaded code stands in **/
+	static function isYours(c:ClassType):Bool {
+		if (mode != Library)
+			return isProject(c);
+		if (c.isExtern || c.isInterface || c.kind.match(KAbstractImpl(_)))
+			return false;
+		var file = fileOf(c.pos);
+		return file != null && inside(file, libraryDirs) && fullName(c.pack, c.name) != libraryMain;
+	}
+
+	/**
+		A method of your code passed as a value, `load(path, place)`, is a bound method or
+		a static's closure, which no reload can re-point: it runs its old code, on both
+		targets. A lambda that calls the method by name, `x -> place(x)`, reaches the new
+		code (natively, through a `@:hot` function). Told, at each use, in every hot build
+	**/
+	static function warnMethodValues(types:Array<ModuleType>) {
+		for (t in types)
+			switch (t) {
+				case TClassDecl(_.get() => c) if (isYours(c)):
+					var fields = c.statics.get().concat(c.fields.get());
+					if (c.constructor != null)
+						fields.push(c.constructor.get());
+					for (f in fields) {
+						// this macro's own, but a `@:hot` function's body (`__hot_impl_f`): a
+						// hook handed to the reloader, and the variable a stub calls through
+						if (f.name.startsWith("__hot_") && !f.name.startsWith("__hot_impl_"))
+							continue;
+						var e = f.expr();
+						if (e != null)
+							methodValues(e, false);
+					}
+				default:
+			}
+	}
+
+	static function methodValues(e:TypedExpr, called:Bool) {
+		switch (e.expr) {
+			case TCall(callee, args):
+				methodValues(callee, true);
+				for (a in args)
+					methodValues(a, false);
+			case TParenthesis(x) | TMeta(_, x):
+				methodValues(x, called);
+			case TField(sub, access):
+				if (!called) {
+					var method = switch (access) {
+						case FStatic(c, cf) | FInstance(c, _, cf) | FClosure({c: c}, cf) if (isYours(c.get())): cf.get();
+						default: null;
+					}
+					if (method != null && method.kind.match(FMethod(MethNormal)))
+						Context.warning('hotreload: ${method.name} passed as a value keeps its old code after a reload; call it from a lambda, x -> ${method.name}(x)', e.pos);
+				}
+				methodValues(sub, false);
+			default:
+				e.iter(x -> methodValues(x, false));
+		}
 	}
 
 	/** the directories of the classes with something hot in them: the reloaded code, natively; each once, and none inside another **/
@@ -499,9 +561,12 @@ class Builder {
 	}
 
 	/**
-		`@:hot static function f()`: a function the main class calls. In the executable, `f`
-		calls through a variable that each reload points at the new module's `f`; the module
-		has `f` as it is, and its signature, which the reloader checks first
+		`@:hot static function f()`: a function the main class calls, or a callback made
+		before a reload. Wherever `f` is compiled, in the executable or in a module, `f`
+		calls through a variable that each reload points at the new module's `__hot_impl_f`,
+		the function as written: so a call to `f` from any code, however old, reaches the
+		newest. The class registers the variable (Hooks.proc) as it starts; the module has
+		`f`'s signature too, which the reloader checks first
 	**/
 	static function hotFunction(className:String, field:Field, f:Function, result:Array<Field>, extra:Array<Field>) {
 		var name = field.name;
@@ -533,18 +598,14 @@ class Builder {
 			pos: field.pos,
 		});
 
-		if (mode == Library) {
-			result.push(field);
-			return;
-		}
-
-		// the executable: the stub, by the function's name, the code it starts with, and
-		// the variable between them
+		// the stub, by the function's name, the code it starts with, and the variable
+		// between them
 		var impl = '__hot_impl_$name';
 		var target = '__hot_fn_$name';
 		result.push({
 			name: impl,
-			access: [AStatic, APrivate],
+			access: [AStatic, APublic],
+			meta: [{name: ":noCompletion", pos: field.pos}],
 			kind: FFun({args: f.args, ret: ret, expr: f.expr}),
 			pos: field.pos,
 		});

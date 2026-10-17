@@ -397,20 +397,22 @@ class Reloader {
 			return;
 		}
 
-		// before any of the new code runs: the main class calls each hot function the way
-		// it was compiled to
+		// before any of the new code runs: every call to a hot function reaches it the way
+		// it was compiled to. (The executable and each module loaded so far registered
+		// their own copies, so a function has several procs, alike)
 		var changedSigs = [];
-		var found = [];
+		var checked = new Map<String, Bool>();
 		for (proc in Hooks.procs) {
+			var key = proc.className + "." + proc.name;
+			if (checked.exists(key))
+				continue;
+			checked.set(key, true);
 			var cls = module.resolveClass(proc.className);
 			var sigFn = cls == null ? null : Reflect.field(cls, "__hot_sig_" + proc.name);
-			if (sigFn == null) {
-				found.push(null);
-				continue;
-			}
+			if (sigFn == null)
+				continue; // gone: told below, once it's certain
 			if (Reflect.callMethod(cls, sigFn, []) != proc.sig)
-				changedSigs.push(proc.className + "." + proc.name);
-			found.push(cls);
+				changedSigs.push(key);
 		}
 		if (changedSigs.length > 0) {
 			Sys.println('hotreload: ${changedSigs.join(", ")}${changedSigs.length == 1 ? "'s" : "'"} signature changed: '
@@ -442,14 +444,21 @@ class Reloader {
 		// modules stay loaded: what old code handed out (a callback) still runs it
 		modules.push(module);
 		Migrate.run(name -> module.resolveClass(name));
-		for (i in 0...Hooks.procs.length) {
-			var proc = Hooks.procs[i];
-			var cls = found[i];
-			if (cls == null) {
-				Sys.println('hotreload: ${proc.className}.${proc.name} is gone from the new code: its last version runs on');
+		// every copy of each hot function, the executable's, each old module's and the new
+		// module's own (registered as it booted), now calls the new module's: so a callback
+		// made before the reload reaches the new code too, through the function it calls
+		var gone = new Map<String, Bool>();
+		for (proc in Hooks.procs) {
+			var cls = module.resolveClass(proc.className);
+			var impl = cls == null ? null : Reflect.field(cls, "__hot_impl_" + proc.name);
+			if (impl == null) {
+				var key = proc.className + "." + proc.name;
+				if (!gone.exists(key))
+					Sys.println('hotreload: $key is gone from the new code: its last version runs on');
+				gone.set(key, true);
 				continue;
 			}
-			proc.point(Reflect.field(cls, proc.name));
+			proc.point(impl);
 		}
 		Hooks.runAfter(); // the new code's
 		if (afterReload != null)

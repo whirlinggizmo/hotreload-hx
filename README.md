@@ -100,11 +100,12 @@ hotreload walks arrays, maps, anonymous structures, reloaded classes' fields and
 enums' values (matched by constructor name). Shared objects stay shared and cycles stay
 cycles.
 
-### Functions the main class calls
+### `@:hot` functions
 
-Natively, the main class is compiled once, so its calls reach the code it was built with.
-A `@:hot` static function is called through the reloader instead, so the main class reaches
-the newest version:
+Natively, code compiled before a reload keeps calling what it was compiled with: the main
+class, which is compiled once, and a closure made before the reload, whose module stays
+loaded. A `@:hot` static function is called through the reloader instead, so a call from
+anywhere reaches the newest version:
 
 ```haxe
 class Game {
@@ -113,11 +114,29 @@ class Game {
 }
 ```
 
-Only functions the main class calls after a reload can have happened need it; anything only
-reloaded code calls is an ordinary function. A `@:hot` function's types must be written out
-(or come from a default value); with neither, a function that returns nothing is `Void`. On
-JS every call reaches the new code, so `@:hot` on a function changes nothing there, and the
-same code works on both.
+Only functions that old code calls after a reload need it: what the main class calls, and
+what a callback calls. Anything only the current code calls is an ordinary function. A
+`@:hot` function's types must be written out (or come from a default value); with neither, a
+function that returns nothing is `Void`. On JS every call by name reaches the new code, so
+`@:hot` on a function changes nothing there, and the same code works on both.
+
+### Callbacks
+
+A closure made before a reload keeps its own code on both targets, but what it calls by
+name is looked up when it runs. On JS that reaches the new code. Natively it reaches the new
+code through a `@:hot` function, and the old module's code otherwise, and an object the
+closure captured is the old copy, which the new code no longer holds. So a callback that
+may outlive a reload, a load's completion, say, does best as a springboard: a lambda that
+calls a `@:hot` function by name and leaves the work to it.
+
+```haxe
+Models.load("ship.obj", file -> Game.loaded(file)); // reaches the newest `loaded`, on both targets
+```
+
+A method passed as a value (`Models.load("ship.obj", place)`) is a bound method, or a
+static's closure, which no reload can re-point: it runs its old code on both targets, and
+the build warns about one. A callback registered once for the program's life (for input,
+say) can be made again in an `@:afterHotReload` hook instead.
 
 ### Reload hooks
 
@@ -262,7 +281,9 @@ the main class's calls at the new code. So a swap never happens in the middle of
 - Objects are copied to the new classes. An object held only from outside the `@:hot`
   statics, such as by the main class, isn't reached, and keeps its old code.
 - A replaced module stays loaded, so a callback handed out before a reload (to an asset
-  loader, say) still works when it fires. It runs its old code, on the same `@:hot` statics.
+  loader, say) still works when it fires. It runs its own old code, on the same `@:hot`
+  statics: a `@:hot` function it calls is the newest, any other method is the old module's,
+  and an object it captured is the old copy, which the new code no longer holds.
 - A `@:hot` function whose signature changed is refused with a message, and the old code
   runs on until a restart. The same goes for adding or renaming one.
 - An edit outside the reloaded code is reported, and needs a restart:
@@ -448,7 +469,8 @@ map, so a breakpoint also hits in the new code after a reload.
 
 ### JS limits
 
-- A closure or bound method (`obj.method`) made before a reload keeps its old code.
+- A closure made before a reload keeps its own code, though what it calls by name is new. A
+  method passed as a value (`load(path, place)`) keeps its old code; the build warns about one.
 - A renamed or removed field is `undefined` on carried objects, as is a new field with no
   initializer.
 
@@ -467,7 +489,7 @@ both.
 | The main class calls reloaded code                 | the new code only through `@:hot` functions | always the new code                 |
 | A carried object                                   | copied to the new class                   | the same object, given the new class  |
 | An object held only from outside the `@:hot` statics | keeps its old code                      | runs the new code                     |
-| A callback made before a reload                    | runs its old code                         | runs the new code (a closure: old)    |
+| A closure made before a reload                     | its own code; the new through `@:hot` functions | its own code; the new for what it calls |
 | A new field with no initializer                    | its type's default (0, false, null)       | `undefined`                           |
 | Reloaded code's speed                              | cppia: 5–56× slower than native           | full speed                            |
 | Breakpoints in reloaded code                       | need the forks; interpreted only          | DevTools, as usual                    |

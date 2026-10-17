@@ -9,7 +9,10 @@ statics:
 - a @:hot static whose type changed is kept when it's still the same kind of value
   (Int to Float), and starts over when not (Int to String), with the same message;
 - a @:hot (default, null) static with no first value, set by the main class, is kept;
-- the main class's statics are kept.
+- the main class's statics are kept;
+- a completion made in the reloaded code before a reload (a lambda calling a @:hot function
+  by name), held by the main class, reaches the new code after it;
+- a method of your code passed as a value is warned about, by both builds alike.
 
     python3 tests/parity/run.py            both targets, then the comparison
     python3 tests/parity/run.py cpp        one target (cpp or js), with its own checks
@@ -28,8 +31,10 @@ OUTSIDE = os.path.join(HERE, "src", "Outside.hx")
 # outside=<count>,<tag>,<n>,<list.length>: the main class sets them to 5,t,5,1; a reload
 # starts them over, though Outside isn't in the native build's module
 EXPECTED = {
-    "v1": "report v1 kept=5 plain=5 widened=3 label=7 service=on outside=5,t,5,1 main=5",
-    "v2": "report v2 kept=5 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5",
+    "v1": "report v1 kept=5 plain=5 widened=3 label=7 service=on outside=5,t,5,1 main=5 loaded=v1:7",
+    "v2": "report v2 kept=5 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v2:8",
+    # the completion v2 made (by a module, natively) reaches v3's onLoaded
+    "v3": "report v3 kept=5 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v3:8",
     "types": [
         "hotreload: game.State.label's type changed (Int to String); started over from its first value",
         "hotreload: game.State.widened's type changed (Int to Float); carried over what still fits",
@@ -52,6 +57,8 @@ def scenario(p, logs):
     result["v1"] = p.wait(r"^report v1")
     install(os.path.join(HERE, "v2"), os.path.join(HERE, "src"))
     result["v2"] = p.wait(r"^report v2", timeout=120)
+    install(os.path.join(HERE, "v3"), os.path.join(HERE, "src"))
+    result["v3"] = p.wait(r"^report v3", timeout=120)
     result["types"] = sorted(set(l.strip() for log in logs for l in open(log) if "type changed" in l))
     return result
 
@@ -97,6 +104,28 @@ def js():
         fresh_sources()
 
 
+def warnings(target):
+    """the warn/ program's build: what the compiler warned about, one line per use of a
+    method as a value (the same on both targets)"""
+    print(f"\n== warnings, {target}")
+    os.makedirs(os.path.join(HERE, "out", "warn"), exist_ok=True)
+    output = {"cpp": ["--cpp", "out/warn/cpp"], "js": ["--js", "out/warn/main.js"]}[target]
+    r = subprocess.run(["haxe", "-cp", "warn", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload", "--no-output"] + output,
+                       cwd=HERE, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit("the warn/ build failed:\n" + r.stderr)
+    lines = [l.strip() for l in r.stderr.splitlines() if "Warning" in l and "hotreload:" in l]
+    for l in lines:
+        print("    | " + l)
+    return lines
+
+
+WARNINGS = [
+    "warn/Warn.hx:14: characters 8-15 : Warning : hotreload: place passed as a value keeps its old code after a reload; call it from a lambda, x -> place(x)",
+    "warn/Warn.hx:15: characters 8-16 : Warning : hotreload: placeAll passed as a value keeps its old code after a reload; call it from a lambda, x -> placeAll(x)",
+]
+
+
 def check(name, result):
     """what one target did, against what's expected"""
     failures = 0
@@ -107,6 +136,9 @@ def check(name, result):
     if "restart" in result and not result["restart"]:
         print(f"  FAILED {name}: the edit outside the reloaded code wasn't told")
         failures += 1
+    if result["warnings"] != WARNINGS:
+        print(f"  FAILED {name}, warnings: {result['warnings']!r}, expected {WARNINGS!r}")
+        failures += 1
     if failures == 0:
         print(f"  ok: {name}, as expected")
     return failures
@@ -116,6 +148,8 @@ if __name__ == "__main__":
     os.makedirs(LOGS, exist_ok=True)
     targets = sys.argv[1:] or ["cpp", "js"]
     results = {t: {"cpp": cpp, "js": js}[t]() for t in targets}
+    for t in targets:
+        results[t]["warnings"] = warnings(t)
     print("\n== results")
     failures = sum(check(t, r) for t, r in results.items())
     if len(targets) == 2:

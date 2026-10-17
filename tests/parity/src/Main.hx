@@ -14,6 +14,17 @@ class Main {
 		Outside.list.push(1);
 		game.State.service = "on";
 		var reloader = new hotreload.Reloader();
+		// a completion the reloaded code made, held here across the next reload: it calls
+		// a @:hot function, so after a reload it reaches the new code, on both targets.
+		// Made again after each reload, by the code just loaded: the one the second reload
+		// finds was made by a module, not by the executable's own copy of the code
+		var completion = game.State.completion();
+		completion(7);
+		reloader.afterReload = () -> {
+			completion(8);
+			game.State.report();
+			completion = game.State.completion();
+		};
 		game.State.start();
 		#if !js
 		while (true) {
