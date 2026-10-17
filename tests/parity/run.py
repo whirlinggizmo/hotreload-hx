@@ -7,6 +7,7 @@ statics:
   first value; a new one starts from its first value;
 - a @:hot static whose type changed is kept when it's still the same kind of value
   (Int to Float), and starts over when not (Int to String), with the same message;
+- a @:hot (default, null) static with no first value, set by the main class, is kept;
 - the statics of a class outside the reloaded code, and of the main class, are kept;
 - an edit outside the reloaded code is told as such;
 - -D hotreload_paths makes a directory part of the reloaded code.
@@ -31,16 +32,16 @@ ROUNDS = {
     # part of it, so their statics are kept, and an edit to Outside is told as outside
     "default": {
         "defines": [],
-        "v1": "report v1 kept=5 plain=5 widened=3 label=7 outside=5 main=5",
-        "v2": "report v2 kept=5 plain=2 widened=3 label=seven added=42 outside=5 main=5",
+        "v1": "report v1 kept=5 plain=5 widened=3 label=7 service=on outside=5 main=5",
+        "v2": "report v2 kept=5 plain=2 widened=3 label=seven added=42 service=on outside=5 main=5",
         "outside": True,
     },
     # -D hotreload_paths=src: Outside is part of it too, so its plain static starts over,
     # and an edit to it reloads; the main class still isn't
     "paths": {
         "defines": ["-D", "hotreload_paths=src"],
-        "v1": "report v1 kept=5 plain=5 widened=3 label=7 outside=5 main=5",
-        "v2": "report v2 kept=5 plain=2 widened=3 label=seven added=42 outside=0 main=5",
+        "v1": "report v1 kept=5 plain=5 widened=3 label=7 service=on outside=5 main=5",
+        "v2": "report v2 kept=5 plain=2 widened=3 label=seven added=42 service=on outside=0 main=5",
         "outside": False,
     },
 }

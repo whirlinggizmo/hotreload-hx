@@ -391,7 +391,7 @@ class Builder {
 				continue;
 			}
 			switch (field.kind) {
-				case FVar(t, e):
+				case FVar(t, e) | FProp("default", _, t, e):
 					hotVar(className, field, t, e, result, extra);
 				case FFun(f):
 					hotFunction(className, field, f, result, extra);
@@ -450,10 +450,13 @@ class Builder {
 			return;
 		}
 		switch (field.kind) {
-			case FVar(null, null):
+			case FVar(null, null) | FProp(_, _, null, null):
 				Context.error("@:hot: give it a type, or a first value", field.pos);
+			case FProp("default", "default" | "null" | "never", _, _):
+			// (a native hot build gives it accessors, which can't keep others from writing it:
+			// every other build of the same code compiles it as written, and says so)
 			case FProp(_, _, _, _):
-				Context.error("@:hot: a static var or function, not a property", field.pos);
+				Context.error("@:hot: a static var or function, or a (default, null) or (default, never) one; not a property with accessors", field.pos);
 			default:
 		}
 	}
@@ -591,7 +594,7 @@ class Builder {
 			// `@:hot` one's as the native build has it, so the two say the same
 			if (field.access.contains(AStatic))
 				switch (field.kind) {
-					case FVar(t, e) if (hot):
+					case FVar(t, e) | FProp("default", _, t, e) if (hot):
 						types.push({field: field.name, expr: macro $v{hotType(field, t, e).sig}});
 					case FVar(t, e) | FProp(_, _, t, e):
 						var sig = if (t != null) t.toString() else if (e != null) try Context.typeof(e).toString() catch (_) null else null;

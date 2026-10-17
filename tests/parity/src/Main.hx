@@ -9,6 +9,7 @@ class Main {
 	static function main() {
 		count = 5;
 		Outside.count = 5;
+		game.State.service = "on";
 		var reloader = new hotreload.Reloader();
 		game.State.start();
 		#if !js
