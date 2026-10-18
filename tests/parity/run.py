@@ -15,7 +15,9 @@ statics:
   by name), held by the main class, reaches the new code after it;
 - a method of your code passed as a value is warned about, by both builds alike;
 - the static functions the main class calls are @:hot without being marked, and a call the
-  build can't see (through an alias) is warned about, by both builds alike.
+  build can't see (through an alias) is warned about, by both builds alike;
+- built through a compilation server, from its cache, into an output directory that isn't
+  there yet, the program builds without false warnings.
 
     python3 tests/parity/run.py            both targets, then the comparison
     python3 tests/parity/run.py cpp        one target (cpp or js), with its own checks
@@ -123,6 +125,39 @@ def warnings(target):
     return lines
 
 
+def server(target):
+    """the program built through a compilation server, as the DevServer and an editor do:
+    four builds, the later ones from the server's cache, into an output directory that
+    isn't there yet. Each build's hotreload warnings: a build whose main class came from
+    the cache says nothing about its calls"""
+    print(f"\n== compilation server, {target}")
+    fresh_sources()
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    out = os.path.join(HERE, "out", "server")
+    shutil.rmtree(out, ignore_errors=True)
+    srv = subprocess.Popen(["haxe", "--wait", str(port)], cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        import time
+        time.sleep(1)
+        output = {"cpp": ["--cpp", "out/server/cpp", "--no-output"], "js": ["--js", "out/server/main.js"]}[target]
+        results = []
+        for reload in [False, False, True, True]:
+            extra = ["-D", "hotreload_reload"] if reload and target == "js" else []
+            r = subprocess.run(["haxe", "--connect", str(port), "-cp", "src", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload"]
+                               + extra + output, cwd=HERE, capture_output=True, text=True)
+            lines = sorted(l.strip() for l in r.stderr.splitlines() if "hotreload:" in l)
+            print(f"    | build {len(results) + 1}: exit {r.returncode}, {len(lines)} hotreload warnings")
+            for l in lines:
+                print("    |   " + l)
+            results.append({"code": r.returncode, "warnings": lines})
+        return results
+    finally:
+        srv.kill()
+        srv.wait()
+
+
 WARNINGS = sorted([
     "warn/Main.hx:11: characters 3-12 : Warning : hotreload: the main class calls Warn.later in a way the build can't see (through an alias?), so it isn't @:hot: mark it yourself, or a native reload won't reach it",
     "warn/Main.hx:12: characters 14-24 : Warning : hotreload: later passed as a value keeps its old code after a reload; call it from a lambda, x -> later(x)",
@@ -141,6 +176,10 @@ def check(name, result):
     if "restart" in result and not result["restart"]:
         print(f"  FAILED {name}: the edit outside the reloaded code wasn't told")
         failures += 1
+    for i, b in enumerate(result.get("server", [])):
+        if b["code"] != 0 or b["warnings"] != []:
+            print(f"  FAILED {name}, compilation server build {i + 1}: exit {b['code']}, warnings {b['warnings']!r}")
+            failures += 1
     if result["warnings"] != WARNINGS:
         print(f"  FAILED {name}, warnings: {result['warnings']!r}, expected {WARNINGS!r}")
         failures += 1
@@ -155,6 +194,7 @@ if __name__ == "__main__":
     results = {t: {"cpp": cpp, "js": js}[t]() for t in targets}
     for t in targets:
         results[t]["warnings"] = warnings(t)
+        results[t]["server"] = server(t)
     print("\n== results")
     failures = sum(check(t, r) for t, r in results.items())
     if len(targets) == 2:

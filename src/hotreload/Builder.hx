@@ -76,6 +76,14 @@ class Builder {
 	**/
 	static var mainCalls = new Map<String, Bool>();
 
+	/**
+		whether the main class was built in this compilation. A compilation server keeps it
+		typed when neither it nor anything it calls changed, and then its build, and the
+		reading of its calls, doesn't run: nothing it calls was built either, so there's
+		nothing to mark or check
+	**/
+	static var mainBuilt = false;
+
 	/** the functions marked that way, `game.Game.update`: told to a reload's build, which marks the same **/
 	static var entries:Array<String> = [];
 
@@ -94,6 +102,7 @@ class Builder {
 		libraryMain = null;
 		configured = false;
 		mainCalls = new Map();
+		mainBuilt = false;
 		entries = [];
 		std = null;
 		if (Context.defined("hotreload_library")) {
@@ -231,6 +240,9 @@ class Builder {
 				js: Path.normalize(absolute(cwd, js)),
 				mainClass: mainClass,
 			};
+			// (the output's directory may not be there yet: the compiler makes it later)
+			if (!sys.FileSystem.exists(Path.directory(path)))
+				sys.FileSystem.createDirectory(Path.directory(path));
 			sys.io.File.saveContent(path, haxe.Json.stringify(config, "\t"));
 		});
 	}
@@ -328,6 +340,7 @@ class Builder {
 
 	/** the main class's calls, as written: `a.b.c(...)` is "a.b.c" **/
 	static function collectCalls(fields:Array<Field>) {
+		mainBuilt = true;
 		function walk(e:Expr) {
 			switch (e.expr) {
 				case ECall({expr: EField(target, name)}, _):
@@ -384,6 +397,8 @@ class Builder {
 		(Natively, the ones marked have a `__hot_sig_`; on JS, the metadata)
 	**/
 	static function checkMainCalls(types:Array<ModuleType>) {
+		if (!mainBuilt)
+			return;
 		for (t in types)
 			switch (t) {
 				case TClassDecl(_.get() => c) if (fullName(c.pack, c.name) == mainClass):
