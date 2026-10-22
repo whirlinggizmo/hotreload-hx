@@ -413,6 +413,16 @@ in `.hotreload-<port>.log` (or `log`), until it's stopped:
 haxe -lib hotreload-hx --macro "hotreload.DevServer.stop(8080)"
 ```
 
+Both take their port from `-D hotreload-port=<n>` when they're given none, and `stop` with
+nothing serving does nothing, so one hxml can replace a server a last run left:
+
+```hxml
+-lib hotreload-hx
+-D hotreload-port=8064
+--macro hotreload.DevServer.stop()
+--macro hotreload.DevServer.serve("build.web.hxml", {background: true})
+```
+
 ```hxml
 # build.web.hxml
 -cp src

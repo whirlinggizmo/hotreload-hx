@@ -190,11 +190,21 @@ class DevServer {
 	static var macroLoop:Loop;
 	static var macroExit = 0;
 
+	/** serve's and stop's port when they're given none: `-D hotreload-port=<n>`, or 8080, so an hxml says it once **/
+	static function macroPort():Int {
+		var defined = haxe.macro.Context.definedValue("hotreload-port");
+		var port = defined == null ? null : Std.parseInt(defined);
+		if (defined != null && port == null)
+			haxe.macro.Context.fatalError('hotreload: -D hotreload-port=$defined isn\'t a port', haxe.macro.Context.currentPos());
+		return port == null ? 8080 : port;
+	}
+
 	/**
 		Starts it from a macro, `--macro hotreload.DevServer.serve(...)`, with the build's
 		arguments (an hxml, say) and the options above, and returns, so the hxml's other
 		macros run too; once they're done, the compiler waits for it. It stops with the
-		compiler: its standard input is a pipe from it (`--stop-with-stdin`).
+		compiler: its standard input is a pipe from it (`--stop-with-stdin`). Its port is
+		`port`, or else `-D hotreload-port=<n>`'s, or 8080.
 
 		With `background: true`, it returns once the server is serving (or fails as it
 		does), and the server keeps running after the compiler, detached from this terminal,
@@ -209,7 +219,7 @@ class DevServer {
 		?background:Bool,
 		?log:String
 	}) {
-		var port = options != null && options.port != null ? options.port : 8080;
+		var port = options != null && options.port != null ? options.port : macroPort();
 		var background = options != null && options.background == true;
 		var args = ["-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", Std.string(port)];
 		if (options != null) {
@@ -225,11 +235,17 @@ class DevServer {
 		var logFile = null;
 		if (background) {
 			logFile = FileSystem.absolutePath(options.log != null ? options.log : '.hotreload-$port.log');
-			// a last run's says nothing of this one; one Windows won't let go of is a server's that's still running
-			if (FileSystem.exists(logFile))
+			// a last run's says nothing of this one. Windows won't let go of a running server's: one just stopped (stop(), just
+			// before) may take a moment to end, past that it's still running
+			var tries = 0;
+			while (FileSystem.exists(logFile))
 				try {
 					FileSystem.deleteFile(logFile);
 				} catch (_) {
+					if (++tries < 30) {
+						Sys.sleep(0.1);
+						continue;
+					}
 					haxe.macro.Context.fatalError('hotreload: $logFile is in use: a dev server still running in the background? '
 						+ 'To stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"', haxe.macro.Context.currentPos());
 				}
@@ -307,8 +323,11 @@ class DevServer {
 	/**
 		Stops the dev server serving on this machine's port (`/__hotreload_stop`), as
 		`--macro hotreload.DevServer.stop(8064)`: one `serve` left in the background, say.
+		Nothing serving there is fine, so an hxml can stop a last run's before its `serve`.
 	**/
-	public static function stop(port = 8080) {
+	public static function stop(?port:Int) {
+		if (port == null)
+			port = macroPort();
 		var socket = new Socket();
 		try {
 			socket.connect(new Host("127.0.0.1"), port);
