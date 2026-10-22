@@ -19,6 +19,9 @@ statics:
 - a class whose statics have no type written builds before the classes it uses, as
   without hotreload: another class's build macro that needs its own to have run first
   isn't run early;
+- hotreload-hx's own classes are never the project's, even with its src/ among the
+  project's class paths: not warned about;
+- the DevServer shows a build's warnings as the build finishes, not when it stops;
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
@@ -141,6 +144,53 @@ def order(target):
     return errors
 
 
+def own(target):
+    """the order/ program built from the repository's root with -cp src, which makes
+    hotreload-hx's src/ one of the project's class paths: the hotreload warnings about its
+    own files (there should be none), or the errors it failed with"""
+    print(f"\n== hotreload-hx's src/ as a project class path, {target}")
+    root = os.path.normpath(os.path.join(HERE, "..", ".."))
+    output = {"cpp": ["--cpp", "tests/parity/out/own/cpp"], "js": ["--js", "tests/parity/out/own/main.js"]}[target]
+    r = subprocess.run(["haxe", "-cp", "src", "-cp", "tests/parity/order", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload",
+                        "--no-output"] + output, cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        lines = [l.strip() for l in r.stderr.splitlines() if "Warning" not in l]
+    else:
+        lines = [l.strip() for l in r.stderr.splitlines() if "hotreload:" in l and "src/hotreload/" in l]
+    for l in lines:
+        print("    | " + l)
+    return lines
+
+
+def dev_output():
+    """the DevServer building warn/: whether the build's warnings came before it said it
+    was serving (they're the build's), not after it stopped"""
+    print("\n== the DevServer's build output, as it builds")
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    log = os.path.join(LOGS, "dev-output.log")
+    server = Program(HERE, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port),
+                            "-cp", "warn", "--main", "Main", "--js", "out/warn/dev/main.js"], log)
+    warned = False
+    try:
+        import time
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            lines = server.lines()
+            for l in lines:
+                print("    | " + l)
+                if "passed as a value" in l:
+                    warned = True
+            if any("hotreload: serving" in l for l in lines):
+                return warned
+            time.sleep(0.02)
+        print("    !! timed out waiting for hotreload: serving")
+        return False
+    finally:
+        server.stop()
+
+
 def server(target):
     """the program built through a compilation server, as the DevServer and an editor do:
     four builds, the later ones from the server's cache, into an output directory that
@@ -199,6 +249,12 @@ def check(name, result):
     if result["order"]:
         print(f"  FAILED {name}, the order/ build: {result['order']!r}")
         failures += 1
+    if result["own"]:
+        print(f"  FAILED {name}, hotreload-hx's src/ as a project class path: {result['own']!r}")
+        failures += 1
+    if result.get("dev_output") is False:
+        print(f"  FAILED {name}: the DevServer's build warnings didn't come before it served")
+        failures += 1
     if result["warnings"] != WARNINGS:
         print(f"  FAILED {name}, warnings: {result['warnings']!r}, expected {WARNINGS!r}")
         failures += 1
@@ -214,6 +270,9 @@ if __name__ == "__main__":
     for t in targets:
         results[t]["warnings"] = warnings(t)
         results[t]["order"] = order(t)
+        results[t]["own"] = own(t)
+        if t == "js":
+            results[t]["dev_output"] = dev_output()
         results[t]["server"] = server(t)
     print("\n== results")
     failures = sum(check(t, r) for t, r in results.items())
