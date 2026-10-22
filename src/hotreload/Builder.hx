@@ -53,6 +53,11 @@ class Builder {
 	/** what the executable's copy of a reloaded class is renamed to: `_hot.` and its path. A reload strips it again **/
 	public static inline var HOST_PREFIX = "_hot.";
 
+	/** a typed expression's type, as a string: a JS class's `__hot_types__` for a static with no type written **/
+	public static macro function typeName(e:haxe.macro.Expr):haxe.macro.Expr {
+		return macro $v{haxe.macro.Context.typeof(e).toString()};
+	}
+
 	#if macro
 	static var mode = Off;
 	static var mainClass:String;
@@ -641,14 +646,44 @@ class Builder {
 		}
 	}
 
-	/** a `@:hot` var's type, and that type as a reload compares it: the one written, or else its first value's **/
+	/**
+		a `@:hot` var's type, and that type as a reload compares it: the one written, or else
+		the one its first value says (`writtenType`)
+	**/
 	static function hotType(field:Field, t:ComplexType, e:Expr):{t:ComplexType, sig:String} {
-		if (t != null)
-			return {t: t, sig: try Context.resolveType(t, field.pos).toString() catch (_) t.toString()};
-		var type = try Context.typeof(e) catch (_) null;
-		if (type == null)
-			Context.error("@:hot: give it a type (its first value's can't be found here)", field.pos);
-		return {t: Context.toComplexType(type), sig: type.toString()};
+		if (t == null)
+			t = writtenType(e);
+		if (t == null)
+			Context.error("@:hot: give it a type (its first value doesn't say it: a literal, `new T()` or a cast would)", field.pos);
+		return {t: t, sig: try Context.resolveType(t, field.pos).toString() catch (_) t.toString()};
+	}
+
+	/**
+		the type an expression says as written: a literal's, `new T()`'s, a cast's or a check's
+		(`(e : T)`), an array of them; else null. Not typed: typing an expression while a class
+		is built (Context.typeof) builds the classes it reaches early, before this one has its
+		fields and its other build macros have run, which breaks theirs
+	**/
+	static function writtenType(e:Expr):ComplexType {
+		if (e == null)
+			return null;
+		return switch (e.expr) {
+			case EConst(CInt(_)): macro:Int;
+			case EConst(CFloat(_)): macro:Float;
+			case EConst(CString(_)): macro:String;
+			case EConst(CRegexp(_)): macro:EReg;
+			case EConst(CIdent("true" | "false")): macro:Bool;
+			case EParenthesis(e) | EMeta(_, e) | EUnop(OpNeg, false, e): writtenType(e);
+			case ENew(tp, _): TPath(tp);
+			case ECheckType(_, t) | ECast(_, t) if (t != null): t;
+			case EArrayDecl(values) if (values.length > 0):
+				var t = writtenType(values[0]);
+				if (t == null || values.exists(v -> writtenType(v) == null || writtenType(v).toString() != t.toString()))
+					null;
+				else
+					TPath({pack: [], name: "Array", params: [TPType(t)]});
+			default: null;
+		}
 	}
 
 	/**
@@ -709,8 +744,8 @@ class Builder {
 		var argTypes = [];
 		for (a in f.args) {
 			var t = a.type;
-			if (t == null && a.value != null)
-				t = try Context.toComplexType(Context.typeof(a.value)) catch (_) null;
+			if (t == null)
+				t = writtenType(a.value);
 			if (t == null)
 				Context.error(why + 'give ${a.name} a type: a reload checks it hasn\'t changed', field.pos);
 			if (t.match(TPath({name: "Rest", pack: ["haxe"] | []})))
@@ -780,9 +815,11 @@ class Builder {
 					// (a property with no storage, `(get, never)`, holds no value: nothing to compare,
 					// and no first value to give it: Haxe refuses one)
 					case FVar(t, e) | FProp(_, _, t, e) if (hasStorage(field)):
-						var sig = if (t != null) t.toString() else if (e != null) try Context.typeof(e).toString() catch (_) null else null;
-						if (sig != null)
-							types.push({field: field.name, expr: macro $v{sig}});
+						// (one with no type written: its own, once it's typed, not its first value's now: see writtenType)
+						if (t != null)
+							types.push({field: field.name, expr: macro $v{t.toString()}});
+						else if (e != null)
+							types.push({field: field.name, expr: macro hotreload.Builder.typeName($i{field.name})});
 						// a plain static with no first value: 0 or false for a number or a bool, as
 						// natively (JS wouldn't emit it, and a reload would leave it undefined; a null
 						// one is left out either way, and the swap gives it null)

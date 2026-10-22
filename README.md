@@ -76,7 +76,8 @@ hotreload: game.State.label's type changed (Int to String); started over from it
 ```
 
 `@:hot` takes a static var, or a static function ([Callbacks](#callbacks)). A var needs a
-type or a first value. It can also be read-only from outside, `(default, null)` or
+type, or a first value that says it: a literal, `new T()` or a cast (`static var hits = 0`;
+`static var hits:Int = count()`). It can also be read-only from outside, `(default, null)` or
 `(default, never)`:
 
 ```haxe

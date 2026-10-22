@@ -16,6 +16,9 @@ statics:
 - a method of your code passed as a value is warned about, by both builds alike;
 - the static functions the main class calls are @:hot without being marked, and a call the
   build can't see (through an alias) is warned about, by both builds alike;
+- a class whose statics have no type written builds before the classes it uses, as
+  without hotreload: another class's build macro that needs its own to have run first
+  isn't run early;
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
@@ -125,6 +128,19 @@ def warnings(target):
     return lines
 
 
+def order(target):
+    """the order/ program's build: the errors it failed with, or none"""
+    print(f"\n== build order, {target}")
+    os.makedirs(os.path.join(HERE, "out", "order"), exist_ok=True)
+    output = {"cpp": ["--cpp", "out/order/cpp"], "js": ["--js", "out/order/main.js"]}[target]
+    r = subprocess.run(["haxe", "-cp", "order", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload", "--no-output"] + output,
+                       cwd=HERE, capture_output=True, text=True)
+    errors = [l.strip() for l in r.stderr.splitlines() if "Warning" not in l] if r.returncode != 0 else []
+    for l in errors:
+        print("    | " + l)
+    return errors
+
+
 def server(target):
     """the program built through a compilation server, as the DevServer and an editor do:
     four builds, the later ones from the server's cache, into an output directory that
@@ -180,6 +196,9 @@ def check(name, result):
         if b["code"] != 0 or b["warnings"] != []:
             print(f"  FAILED {name}, compilation server build {i + 1}: exit {b['code']}, warnings {b['warnings']!r}")
             failures += 1
+    if result["order"]:
+        print(f"  FAILED {name}, the order/ build: {result['order']!r}")
+        failures += 1
     if result["warnings"] != WARNINGS:
         print(f"  FAILED {name}, warnings: {result['warnings']!r}, expected {WARNINGS!r}")
         failures += 1
@@ -194,6 +213,7 @@ if __name__ == "__main__":
     results = {t: {"cpp": cpp, "js": js}[t]() for t in targets}
     for t in targets:
         results[t]["warnings"] = warnings(t)
+        results[t]["order"] = order(t)
         results[t]["server"] = server(t)
     print("\n== results")
     failures = sum(check(t, r) for t, r in results.items())
