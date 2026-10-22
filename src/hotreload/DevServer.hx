@@ -59,7 +59,8 @@ using StringTools;
 	It serves the build's output directory at `/`, with Range requests (an engine may
 	stream assets), and `/__hotreload`, which says what the latest build is (with `?since=<n>`, once there's
 	one newer than n). `/__hotreload_assets` says which served files changed (with `?since=<n>`, the
-	same way), and `/__hotreload_stop`, asked from this machine, stops it. Ten times a
+	same way), `/__hotreload_project` says the directory it was started in, and
+	`/__hotreload_stop`, asked from this machine, stops it. Ten times a
 	second it checks the project's sources for changes: the build's class paths inside its
 	directory (`-cp`), or else the main class's directory, and below. Once they've stopped
 	changing, it rebuilds, through a compilation server it starts, and the page, which is
@@ -74,6 +75,9 @@ class DevServer {
 	static var mounts = new Map<String, String>();
 	static var reloadDefines = new Array<String>();
 	static var root:String;
+
+	/** the directory it was started in: its project, which a restart (serve's) checks is the same **/
+	static var project = Path.removeTrailingSlashes(Path.normalize(Sys.getCwd()));
 	static var bundleUrl:String;
 	static var config:Builder.JsConfig;
 	static var version = 0;
@@ -204,7 +208,9 @@ class DevServer {
 		arguments (an hxml, say) and the options above, and returns, so the hxml's other
 		macros run too; once they're done, the compiler waits for it. It stops with the
 		compiler: its standard input is a pipe from it (`--stop-with-stdin`). Its port is
-		`port`, or else `-D hotreload-port=<n>`'s, or 8080.
+		`port`, or else `-D hotreload-port=<n>`'s, or 8080. With `restart: true`, a dev
+		server this project left on the port (one started in this directory) is stopped
+		first; another project's isn't, and this fails saying whose it is.
 
 		With `background: true`, it returns once the server is serving (or fails as it
 		does), and the server keeps running after the compiler, detached from this terminal,
@@ -217,9 +223,12 @@ class DevServer {
 		?reloadDefines:Array<String>,
 		?compilationServer:Bool,
 		?background:Bool,
-		?log:String
+		?log:String,
+		?restart:Bool
 	}) {
 		var port = options != null && options.port != null ? options.port : macroPort();
+		if (options != null && options.restart == true)
+			stopOwn(port);
 		var background = options != null && options.background == true;
 		var args = ["-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", Std.string(port)];
 		if (options != null) {
@@ -328,36 +337,69 @@ class DevServer {
 	public static function stop(?port:Int) {
 		if (port == null)
 			port = macroPort();
-		var socket = new Socket();
-		try {
-			socket.connect(new Host("127.0.0.1"), port);
-		} catch (_) {
-			socket.close();
+		var answer = ask(port, "/__hotreload_stop");
+		if (answer == null) {
 			Sys.println('hotreload: nothing is serving on port $port');
 			return;
 		}
-		var answer = try {
-			socket.output.writeString("GET /__hotreload_stop HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
-			socket.input.readAll().toString();
-		} catch (_) "";
-		socket.close();
-		if (!answer.endsWith("stopping"))
+		if (answer != "stopping")
 			haxe.macro.Context.fatalError('hotreload: what serves on port $port isn\'t the dev server', haxe.macro.Context.currentPos());
 		// gone once the port is free
 		for (_ in 0...100) {
-			var probe = new Socket();
-			var up = try {
-				probe.connect(new Host("127.0.0.1"), port);
-				true;
-			} catch (_) false;
-			probe.close();
-			if (!up) {
+			if (ask(port, null) == null) {
 				Sys.println('hotreload: stopped the dev server on port $port');
 				return;
 			}
 			Sys.sleep(0.1);
 		}
 		haxe.macro.Context.fatalError('hotreload: the dev server on port $port was asked to stop, and is still serving', haxe.macro.Context.currentPos());
+	}
+
+	/** restart's stop: the server on the port stopped if it's this project's (started in this directory), left be if not **/
+	static function stopOwn(port:Int) {
+		var answer = ask(port, "/__hotreload_project");
+		if (answer == null)
+			return;
+		var key = (dir:String) -> {
+			var d = Path.removeTrailingSlashes(Path.normalize(dir));
+			Sys.systemName() == "Windows" ? d.toLowerCase() : d;
+		}
+		var devServer = answer != "" && !answer.startsWith("HTTP");
+		if (devServer && key(answer) == key(Sys.getCwd())) {
+			stop(port);
+			return;
+		}
+		var stopIt = 'haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"';
+		haxe.macro.Context.fatalError(devServer ? 'hotreload: port $port is served by the dev server of $answer, not this project\'s; to stop it anyway: $stopIt'
+			: 'hotreload: port $port is in use, and not by a dev server to restart (one from an older hotreload-hx stops with: $stopIt)',
+			haxe.macro.Context.currentPos());
+	}
+
+	/**
+		The body of a GET of path from this machine's port, or null if nothing serves
+		there; one not answered 200 is its status line. With no path, only whether
+		something serves (null or "").
+	**/
+	static function ask(port:Int, path:Null<String>):Null<String> {
+		var socket = new Socket();
+		try {
+			socket.connect(new Host("127.0.0.1"), port);
+		} catch (_) {
+			socket.close();
+			return null;
+		}
+		if (path == null) {
+			socket.close();
+			return "";
+		}
+		var response = try {
+			socket.output.writeString('GET $path HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n');
+			socket.input.readAll().toString();
+		} catch (_) "";
+		socket.close();
+		var head = response.indexOf("\r\n\r\n");
+		var status = response.split("\r\n")[0];
+		return status.indexOf(" 200 ") > 0 && head >= 0 ? response.substr(head + 4) : status;
 	}
 	#end
 
@@ -618,14 +660,18 @@ class DevServer {
 			});
 			return;
 		}
-		if (path == "/__hotreload_stop") {
-			// from this machine only: a page elsewhere has no business stopping it
+		if (path == "/__hotreload_stop" || path == "/__hotreload_project") {
+			// from this machine only: a page elsewhere has no business stopping it, or knowing where it runs
 			var peer = switch (client.getPeerName()) {
 				case Ok(addr): addr.toString();
 				case Error(_): "";
 			}
 			if (peer != "127.0.0.1") {
 				send(client, 403, "text/plain", haxe.io.Bytes.ofString("from 127.0.0.1 only"));
+				return;
+			}
+			if (path == "/__hotreload_project") {
+				send(client, 200, "text/plain", haxe.io.Bytes.ofString(project));
 				return;
 			}
 			// once it's said: the watchers' loops end, and this one's check closes the server
