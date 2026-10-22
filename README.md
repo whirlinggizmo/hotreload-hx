@@ -394,6 +394,16 @@ changes. Give it the build's own arguments, such as an hxml:
 haxe -lib hotreload-hx --run hotreload.DevServer [--port 8080] [--mount /url=dir] build.web.hxml
 ```
 
+Or from a macro, which checks its options as it compiles and returns, so one hxml can start
+the dev server beside other watchers; the compiler waits for it after its macros, and it
+stops with the compiler however that ends:
+
+```hxml
+# watch.hxml: haxe watch.hxml
+-lib hotreload-hx
+--macro hotreload.DevServer.serve("build.web.hxml", {port: 8080, mounts: {"/assets": "assets"}})
+```
+
 ```hxml
 # build.web.hxml
 -cp src

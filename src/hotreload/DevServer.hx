@@ -37,6 +37,18 @@ using StringTools;
 	  for something the page loads once, which the first build makes and a reload's needn't
 	  (a native host a guest runs in, say)
 	- `--no-compilation-server`: builds each reload with a `haxe` of its own
+	- `--stop-with-stdin`: stops when its standard input closes: for a program that starts
+	  it with a pipe there, so it stops when that program does, however that is (`serve`)
+
+	Or from a macro, in an hxml of its own beside others' (a watcher, say):
+
+	```
+	-lib hotreload-hx
+	--macro hotreload.DevServer.serve("build.web.hxml", {port: 8064, mounts: {"/assets": "assets"}})
+	```
+
+	`serve` starts it and returns; the compiler waits for it once its macros are done, and
+	it stops with the compiler, Ctrl+C or not.
 
 	It serves the build's output directory at `/`, with Range requests (an engine may
 	stream assets), and `/__hotreload`, which says what the latest build is (with `?since=<n>`, once there's
@@ -87,6 +99,15 @@ class DevServer {
 					useServer = false;
 				case "--reload-define":
 					reloadDefines.push(args[++i]);
+				case "--stop-with-stdin":
+					// the pipe's other end closes when its program ends, killed or not, on every system
+					Thread.create(() -> {
+						try {
+							while (true)
+								Sys.stdin().readByte();
+						} catch (_) {}
+						running = false;
+					});
 				default:
 					build.push(args[i]);
 			}
@@ -134,7 +155,7 @@ class DevServer {
 			Sys.exit(1);
 		}
 		var compilationServer = useServer ? startCompilationServer() : null;
-		Thread.create(() -> serve(loop, server));
+		Thread.create(() -> serveRequests(loop, server));
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
 		Sys.println('hotreload: serving http://localhost:$port/ ($root)');
 		for (url => dir in mounts)
@@ -146,6 +167,62 @@ class DevServer {
 		Sys.println("hotreload: stopped");
 		Sys.exit(0);
 	}
+
+	#if macro
+	static var macroLoop:Loop;
+	static var macroExit = 0;
+
+	/**
+		Starts it from a macro, `--macro hotreload.DevServer.serve(...)`, with the build's
+		arguments (an hxml, say) and the options above, and returns, so the hxml's other
+		macros run too; once they're done, the compiler waits for it. It stops with the
+		compiler: its standard input is a pipe from it (`--stop-with-stdin`).
+	**/
+	public static function serve(build:haxe.extern.EitherType<String, Array<String>>,
+			?options:{?port:Int, ?mounts:haxe.DynamicAccess<String>, ?reloadDefines:Array<String>, ?compilationServer:Bool}) {
+		var args = ["-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--stop-with-stdin"];
+		if (options != null) {
+			if (options.port != null)
+				args = args.concat(["--port", Std.string(options.port)]);
+			if (options.mounts != null)
+				for (url => dir in options.mounts)
+					args = args.concat(["--mount", '$url=$dir']);
+			if (options.reloadDefines != null)
+				for (d in options.reloadDefines)
+					args = args.concat(["--reload-define", d]);
+			if (options.compilationServer == false)
+				args.push("--no-compilation-server");
+		}
+		args = args.concat(Std.isOfType(build, String) ? [(build : String)] : (build : Array<String>));
+
+		if (macroLoop == null) {
+			macroLoop = Loop.init().resolve();
+			// and fails as the server does, as the hxml with --run did
+			haxe.macro.Context.onAfterGenerate(() -> {
+				macroLoop.run(DEFAULT);
+				if (macroExit != 0)
+					Sys.exit(macroExit);
+			});
+		}
+		var pipe = eval.luv.Pipe.init(macroLoop).resolve();
+		var redirect = [
+			eval.luv.Process.toParentPipe(eval.luv.Process.stdin, pipe, true, false, false),
+			eval.luv.Process.inheritFd(eval.luv.Process.stdout, 1),
+			eval.luv.Process.inheritFd(eval.luv.Process.stderr, 2)
+		];
+		var onExit = (p:eval.luv.Process, status:eval.integers.Int64, signal) -> {
+			if (status.toInt() != 0)
+				macroExit = status.toInt();
+			Handle.close(pipe, () -> {});
+			Handle.close(p, () -> {});
+		};
+		switch (eval.luv.Process.spawn(macroLoop, "haxe", [for (a in ["haxe"].concat(args)) (a : eval.NativeString)], {redirect: redirect, onExit: onExit})) {
+			case Error(e):
+				haxe.macro.Context.fatalError('hotreload: can\'t start the server: $e', haxe.macro.Context.currentPos());
+			case Ok(_):
+		}
+	}
+	#end
 
 	// --- building ---
 
@@ -291,7 +368,7 @@ class DevServer {
 	// --- serving ---
 
 	/** runs the loop: its connections, and a check of the held long polls a hundred times a second **/
-	static function serve(loop:Loop, server:Tcp) {
+	static function serveRequests(loop:Loop, server:Tcp) {
 		var check = Timer.init(loop).resolve();
 		check.start(() -> {
 			var now = haxe.Timer.stamp();
