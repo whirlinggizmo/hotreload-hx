@@ -85,6 +85,10 @@ class DevServer {
 
 	static function main() {
 		var args = Sys.args();
+		if (args[0] == "--compilation-server") {
+			compilationServerUntilStdinCloses(args[1]);
+			return;
+		}
 		var build = [];
 		var useServer = true;
 		var i = 0;
@@ -340,7 +344,8 @@ class DevServer {
 		socket.close();
 		// in a shell that stops it when this stops, however that is (as the Reloader's)
 		if (Sys.systemName() == "Windows")
-			new Process("haxe", ["--wait", address]);
+			// no sh: this again, whose stdin, a pipe from this, closes when this ends
+			new Process("haxe", ["-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--compilation-server", address]);
 		else
 			new Process("sh", [
 				"-c",
@@ -363,6 +368,17 @@ class DevServer {
 		}
 		Sys.println("hotreload: the compilation server didn't start; building without it");
 		return null;
+	}
+
+	/** `haxe --wait address` until stdin closes: the dev server's compilation server on Windows **/
+	static function compilationServerUntilStdinCloses(address:String) {
+		var server = new Process("haxe", ["--wait", address]);
+		try {
+			while (true)
+				Sys.stdin().readByte();
+		} catch (_) {}
+		server.kill();
+		server.close();
 	}
 
 	// --- serving ---
