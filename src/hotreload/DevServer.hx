@@ -39,6 +39,7 @@ using StringTools;
 	- `--no-compilation-server`: builds each reload with a `haxe` of its own
 	- `--stop-with-stdin`: stops when its standard input closes: for a program that starts
 	  it with a pipe there, so it stops when that program does, however that is (`serve`)
+	- `--log <file>`: its messages, and the builds', to the file instead of the terminal
 
 	Or from a macro, in an hxml of its own beside others' (a watcher, say):
 
@@ -48,16 +49,22 @@ using StringTools;
 	```
 
 	`serve` starts it and returns; the compiler waits for it once its macros are done, and
-	it stops with the compiler, Ctrl+C or not.
+	it stops with the compiler, Ctrl+C or not. With `background: true` it keeps running
+	after the compiler, its messages in a log, until it's stopped:
+
+	```
+	haxe -lib hotreload-hx --macro "hotreload.DevServer.stop(8064)"
+	```
 
 	It serves the build's output directory at `/`, with Range requests (an engine may
 	stream assets), and `/__hotreload`, which says what the latest build is (with `?since=<n>`, once there's
 	one newer than n). `/__hotreload_assets` says which served files changed (with `?since=<n>`, the
 	same way), and `/__hotreload_stop`, asked from this machine, stops it. Ten times a
-	second it checks the sources in the main class's directory, and below, for changes;
-	once they've stopped changing, it rebuilds, through a compilation server it starts,
-	and the page, which is waiting to hear of it, loads it. Compiler errors go to this
-	terminal, and the page keeps running what it has.
+	second it checks the project's sources for changes: the build's class paths inside its
+	directory (`-cp`), or else the main class's directory, and below. Once they've stopped
+	changing, it rebuilds, through a compilation server it starts, and the page, which is
+	waiting to hear of it, loads it. Compiler errors go to this terminal (or the log), and
+	the page keeps running what it has.
 **/
 class DevServer {
 	/** how often the sources are checked: a check is a directory walk, cheap at this size **/
@@ -72,6 +79,11 @@ class DevServer {
 	static var version = 0;
 	static var failed = false;
 	static var lock = new Mutex();
+
+	/** where its messages go: the terminal, or a file (--log) **/
+	static var log:sys.io.FileOutput;
+
+	static var logLock = new Mutex();
 
 	/** the served files' changes: each settled batch a version, its URLs (/__hotreload_assets) **/
 	/** cleared by a stop (/__hotreload_stop), which ends the watchers' loops and the serving one **/
@@ -103,6 +115,8 @@ class DevServer {
 					useServer = false;
 				case "--reload-define":
 					reloadDefines.push(args[++i]);
+				case "--log":
+					log = File.write(args[++i]);
 				case "--stop-with-stdin":
 					// the pipe's other end closes when its program ends, killed or not, on every system
 					Thread.create(() -> {
@@ -118,19 +132,19 @@ class DevServer {
 			i++;
 		}
 		if (build.length == 0) {
-			Sys.println("usage: haxe -lib hotreload-hx --run hotreload.DevServer [--port n] [--mount /url=dir] <build arguments>");
+			say("usage: haxe -lib hotreload-hx --run hotreload.DevServer [--port n] [--mount /url=dir] <build arguments>");
 			Sys.exit(1);
 		}
 
 		// the first build: hot, and saying how it was made
 		var configFile = Path.join([Sys.getCwd(), ".hotreload." + Std.random(1 << 30) + ".json"]);
-		Sys.println("hotreload: building");
+		say("hotreload: building");
 		// with the library, whether the build names it or not
-		var code = Sys.command("haxe", build.concat(["-lib", "hotreload-hx", "-D", "hotreload", "-D", 'hotreload_config=$configFile']));
+		var code = runHaxe(build.concat(["-lib", "hotreload-hx", "-D", "hotreload", "-D", 'hotreload_config=$configFile']));
 		if (code != 0 || !FileSystem.exists(configFile)) {
 			if (FileSystem.exists(configFile))
 				FileSystem.deleteFile(configFile);
-			Sys.println(code != 0 ? "hotreload: the build failed" : "hotreload: the build isn't hot: is it a JS build, with -lib hotreload-hx?");
+			say(code != 0 ? "hotreload: the build failed" : "hotreload: the build isn't hot: is it a JS build, with -lib hotreload-hx?");
 			Sys.exit(1);
 		}
 		config = haxe.Json.parse(File.getContent(configFile));
@@ -155,20 +169,20 @@ class DevServer {
 				case Ok(_): accept(loop, server);
 			}, 32);
 		if (failure != null) {
-			Sys.println('hotreload: can\'t serve on port $port ($failure): is something else using it? --port <n> for another');
+			say('hotreload: can\'t serve on port $port ($failure): is something else using it? --port <n> for another');
 			Sys.exit(1);
 		}
 		var compilationServer = useServer ? startCompilationServer() : null;
 		Thread.create(() -> serveRequests(loop, server));
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
-		Sys.println('hotreload: serving http://localhost:$port/ ($root)');
+		say('hotreload: serving http://localhost:$port/ ($root)');
 		for (url => dir in mounts)
-			Sys.println('hotreload: and $dir at $url/');
-		Sys.println('hotreload: watching ${dirs.join(", ")}');
+			say('hotreload: and $dir at $url/');
+		say('hotreload: watching ${dirs.join(", ")}');
 		Thread.create(watchAssets);
 		watch(compilationServer);
 		// the compilation server's shell sees this process go, and stops it
-		Sys.println("hotreload: stopped");
+		say("hotreload: stopped");
 		Sys.exit(0);
 	}
 
@@ -181,13 +195,24 @@ class DevServer {
 		arguments (an hxml, say) and the options above, and returns, so the hxml's other
 		macros run too; once they're done, the compiler waits for it. It stops with the
 		compiler: its standard input is a pipe from it (`--stop-with-stdin`).
+
+		With `background: true`, it returns once the server is serving (or fails as it
+		does), and the server keeps running after the compiler, detached from this terminal,
+		so Ctrl+C here and closing it leave it be; its messages go to `log` (`.hotreload-<port>.log` by default), and `stop(port)`
+		stops it.
 	**/
-	public static function serve(build:haxe.extern.EitherType<String, Array<String>>,
-			?options:{?port:Int, ?mounts:haxe.DynamicAccess<String>, ?reloadDefines:Array<String>, ?compilationServer:Bool}) {
-		var args = ["-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--stop-with-stdin"];
+	public static function serve(build:haxe.extern.EitherType<String, Array<String>>, ?options:{
+		?port:Int,
+		?mounts:haxe.DynamicAccess<String>,
+		?reloadDefines:Array<String>,
+		?compilationServer:Bool,
+		?background:Bool,
+		?log:String
+	}) {
+		var port = options != null && options.port != null ? options.port : 8080;
+		var background = options != null && options.background == true;
+		var args = ["-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", Std.string(port)];
 		if (options != null) {
-			if (options.port != null)
-				args = args.concat(["--port", Std.string(options.port)]);
 			if (options.mounts != null)
 				for (url => dir in options.mounts)
 					args = args.concat(["--mount", '$url=$dir']);
@@ -197,34 +222,123 @@ class DevServer {
 			if (options.compilationServer == false)
 				args.push("--no-compilation-server");
 		}
+		var logFile = null;
+		if (background) {
+			logFile = FileSystem.absolutePath(options.log != null ? options.log : '.hotreload-$port.log');
+			// a last run's says nothing of this one; one Windows won't let go of is a server's that's still running
+			if (FileSystem.exists(logFile))
+				try {
+					FileSystem.deleteFile(logFile);
+				} catch (_) {
+					haxe.macro.Context.fatalError('hotreload: $logFile is in use: a dev server still running in the background? '
+						+ 'To stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"', haxe.macro.Context.currentPos());
+				}
+			args = args.concat(["--log", logFile]);
+		} else {
+			args.push("--stop-with-stdin");
+		}
 		args = args.concat(Std.isOfType(build, String) ? [(build : String)] : (build : Array<String>));
 
-		if (macroLoop == null) {
-			macroLoop = Loop.init().resolve();
-			// and fails as the server does, as the hxml with --run did
-			haxe.macro.Context.onAfterGenerate(() -> {
-				macroLoop.run(DEFAULT);
-				if (macroExit != 0)
-					Sys.exit(macroExit);
-			});
+		var loop = if (background) Loop.init().resolve() else {
+			if (macroLoop == null) {
+				macroLoop = Loop.init().resolve();
+				// and fails as the server does, as the hxml with --run did
+				haxe.macro.Context.onAfterGenerate(() -> {
+					macroLoop.run(DEFAULT);
+					if (macroExit != 0)
+						Sys.exit(macroExit);
+				});
+			}
+			macroLoop;
 		}
-		var pipe = eval.luv.Pipe.init(macroLoop).resolve();
-		var redirect = [
-			eval.luv.Process.toParentPipe(eval.luv.Process.stdin, pipe, true, false, false),
+		var pipe = eval.luv.Pipe.init(loop).resolve();
+		var stdin = eval.luv.Process.toParentPipe(eval.luv.Process.stdin, pipe, true, false, false);
+		// in the background, detached: a session of its own (Unix), no console and out of libuv's job, which would end it
+		// with the compiler (Windows); so this terminal's Ctrl+C and closing it leave it be. Its builds start hidden (--log)
+		var redirect = background ? [stdin] : [
+			stdin,
 			eval.luv.Process.inheritFd(eval.luv.Process.stdout, 1),
 			eval.luv.Process.inheritFd(eval.luv.Process.stderr, 2)
 		];
+		// nor this one's stdout and stderr, which Windows would hand it: whatever reads them (an editor's task) would wait for it
+		if (background)
+			eval.luv.Process.disableStdioInheritance();
+		var exited = false;
 		var onExit = (p:eval.luv.Process, status:eval.integers.Int64, signal) -> {
+			exited = true;
 			if (status.toInt() != 0)
 				macroExit = status.toInt();
 			Handle.close(pipe, () -> {});
 			Handle.close(p, () -> {});
 		};
-		switch (eval.luv.Process.spawn(macroLoop, "haxe", [for (a in ["haxe"].concat(args)) (a : eval.NativeString)], {redirect: redirect, onExit: onExit})) {
+		var process = switch (eval.luv.Process.spawn(loop, "haxe", [for (a in ["haxe"].concat(args)) (a : eval.NativeString)], {
+			redirect: redirect,
+			onExit: onExit,
+			detached: background,
+			windowsHide: background
+		})) {
 			case Error(e):
 				haxe.macro.Context.fatalError('hotreload: can\'t start the server: $e', haxe.macro.Context.currentPos());
-			case Ok(_):
+			case Ok(p): p;
 		}
+		if (!background)
+			return;
+
+		// once it's serving, or it's failed: its messages so far, here
+		var said = "";
+		while (true) {
+			loop.run(NOWAIT);
+			said = try File.getContent(logFile) catch (_) "";
+			if (exited || said.contains("hotreload: watching"))
+				break;
+			Sys.sleep(0.1);
+		}
+		if (said.trim() != "")
+			Sys.println(said.rtrim());
+		if (exited)
+			Sys.exit(macroExit != 0 ? macroExit : 1);
+		Sys.println('hotreload: in the background, its messages in $logFile; to stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"');
+		// the process goes on without this: only the handles are let go
+		Handle.close(pipe, () -> {});
+		Handle.close(process, () -> {});
+		loop.run(NOWAIT);
+	}
+
+	/**
+		Stops the dev server serving on this machine's port (`/__hotreload_stop`), as
+		`--macro hotreload.DevServer.stop(8064)`: one `serve` left in the background, say.
+	**/
+	public static function stop(port = 8080) {
+		var socket = new Socket();
+		try {
+			socket.connect(new Host("127.0.0.1"), port);
+		} catch (_) {
+			socket.close();
+			Sys.println('hotreload: nothing is serving on port $port');
+			return;
+		}
+		var answer = try {
+			socket.output.writeString("GET /__hotreload_stop HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
+			socket.input.readAll().toString();
+		} catch (_) "";
+		socket.close();
+		if (!answer.endsWith("stopping"))
+			haxe.macro.Context.fatalError('hotreload: what serves on port $port isn\'t the dev server', haxe.macro.Context.currentPos());
+		// gone once the port is free
+		for (_ in 0...100) {
+			var probe = new Socket();
+			var up = try {
+				probe.connect(new Host("127.0.0.1"), port);
+				true;
+			} catch (_) false;
+			probe.close();
+			if (!up) {
+				Sys.println('hotreload: stopped the dev server on port $port');
+				return;
+			}
+			Sys.sleep(0.1);
+		}
+		haxe.macro.Context.fatalError('hotreload: the dev server on port $port was asked to stop, and is still serving', haxe.macro.Context.currentPos());
 	}
 	#end
 
@@ -257,7 +371,7 @@ class DevServer {
 			assetVersion++;
 			assetChanges.push({version: assetVersion, urls: urls});
 			lock.release();
-			Sys.println('hotreload: ${urls.join(", ")} changed; the page loads it next');
+			say('hotreload: ${urls.join(", ")} changed; the page loads it next');
 		}
 	}
 
@@ -283,7 +397,7 @@ class DevServer {
 	}
 
 	static function rebuild(changed:Array<String>, compilationServer:String) {
-		Sys.println('hotreload: building (${[for (p in changed) relative(p)].join(", ")} changed)');
+		say('hotreload: building (${[for (p in changed) relative(p)].join(", ")} changed)');
 		var start = haxe.Timer.stamp();
 		lock.acquire();
 		var next = version + 1;
@@ -296,7 +410,7 @@ class DevServer {
 			args = args.concat(["-D", d]);
 		if (compilationServer != null)
 			args = ["--connect", compilationServer].concat(args);
-		var code = Sys.command("haxe", ["--cwd", config.cwd].concat(args));
+		var code = runHaxe(["--cwd", config.cwd].concat(args));
 		lock.acquire();
 		if (code == 0) {
 			stamp(next);
@@ -307,7 +421,7 @@ class DevServer {
 		}
 		lock.release();
 		var ms = Math.round((haxe.Timer.stamp() - start) * 1000);
-		Sys.println(code == 0 ? 'hotreload: built in $ms ms; the page loads it next' : "hotreload: build failed; the page keeps what it has");
+		say(code == 0 ? 'hotreload: built in $ms ms; the page loads it next' : "hotreload: build failed; the page keeps what it has");
 	}
 
 	/**
@@ -366,11 +480,44 @@ class DevServer {
 				Sys.sleep(0.05);
 			}
 		}
-		Sys.println("hotreload: the compilation server didn't start; building without it");
+		say("hotreload: the compilation server didn't start; building without it");
 		return null;
 	}
 
 	/** `haxe --wait address` until stdin closes: the dev server's compilation server on Windows **/
+	static function say(message:String) {
+		if (log == null) {
+			Sys.println(message);
+			return;
+		}
+		logLock.acquire();
+		log.writeString(message + "\n");
+		log.flush();
+		logLock.release();
+	}
+
+	/** haxe with these arguments, its messages to the terminal, or to the log (--log) **/
+	static function runHaxe(args:Array<String>):Int {
+		if (log == null)
+			return Sys.command("haxe", args);
+		var p = new Process("haxe", args);
+		// both read at once: a full pipe would stall the compiler
+		var errors = "";
+		var read = new sys.thread.Lock();
+		Thread.create(() -> {
+			errors = p.stderr.readAll().toString();
+			read.release();
+		});
+		var output = p.stdout.readAll().toString();
+		read.wait();
+		var code = p.exitCode();
+		p.close();
+		for (text in [output, errors])
+			if (text.trim() != "")
+				say(text.rtrim());
+		return code;
+	}
+
 	static function compilationServerUntilStdinCloses(address:String) {
 		var server = new Process("haxe", ["--wait", address]);
 		try {

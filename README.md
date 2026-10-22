@@ -404,6 +404,15 @@ stops with the compiler however that ends:
 --macro hotreload.DevServer.serve("build.web.hxml", {port: 8080, mounts: {"/assets": "assets"}})
 ```
 
+`mounts` serves directories besides the build's output, such as assets; the sources it
+watches are the build's own class paths (`-cp`). With `background: true`, `serve` returns
+once the server is serving and leaves it running, detached from the terminal, its messages
+in `.hotreload-<port>.log` (or `log`), until it's stopped:
+
+```bash
+haxe -lib hotreload-hx --macro "hotreload.DevServer.stop(8080)"
+```
+
 ```hxml
 # build.web.hxml
 -cp src
