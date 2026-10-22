@@ -110,6 +110,7 @@ class Builder {
 		mainBuilt = false;
 		entries = [];
 		std = null;
+		own = null;
 		if (Context.defined("hotreload_library")) {
 			mode = Library;
 			libraryDirs = Context.definedValue("hotreload_dirs").split("|");
@@ -279,7 +280,7 @@ class Builder {
 		if (c.isExtern || c.isInterface || c.kind.match(KAbstractImpl(_)))
 			return false;
 		var file = fileOf(c.pos);
-		return file != null && file != mainFile && inside(file, projectDirs) && !file.startsWith(stdDir());
+		return file != null && file != mainFile && inside(file, projectDirs) && !file.startsWith(stdDir()) && !file.startsWith(ownDir());
 	}
 
 	/** a class of your code, in whichever build: in a reload's build, the project's class paths aren't known, and the reloaded code stands in **/
@@ -1148,6 +1149,18 @@ class Builder {
 			// StdTypes.hx is only at the standard library's root (Std.hx is overridden per target, in cpp/_std/, js/_std/)
 			std = Path.addTrailingSlash(Path.directory(Path.normalize(FileSystem.absolutePath(Context.resolvePath("StdTypes.hx")))));
 		return std;
+	}
+
+	static var own:String;
+
+	/**
+		this library's own class path (its src/), never the project's, wherever it is: the
+		reloader's statics aren't started over, nor its code warned about
+	**/
+	static function ownDir():String {
+		if (own == null)
+			own = Path.addTrailingSlash(Path.directory(Path.directory(Path.normalize(FileSystem.absolutePath(Context.resolvePath("hotreload/Builder.hx"))))));
+		return own;
 	}
 
 	static function isMain(cls:ClassType):Bool {

@@ -559,24 +559,35 @@ class DevServer {
 
 	/** haxe with these arguments, its messages to the terminal, or to the log (--log) **/
 	static function runHaxe(args:Array<String>):Int {
-		if (log == null)
-			return Sys.command("haxe", args);
+		// its output passed on a line at a time, as it comes: not Sys.command, whose child's
+		// stderr (the compiler's warnings and errors) `haxe --run` holds until this ends
 		var p = new Process("haxe", args);
 		// both read at once: a full pipe would stall the compiler
-		var errors = "";
 		var read = new sys.thread.Lock();
 		Thread.create(() -> {
-			errors = p.stderr.readAll().toString();
+			passOn(p.stderr, Sys.stderr());
 			read.release();
 		});
-		var output = p.stdout.readAll().toString();
+		passOn(p.stdout, Sys.stdout());
 		read.wait();
 		var code = p.exitCode();
 		p.close();
-		for (text in [output, errors])
-			if (text.trim() != "")
-				say(text.rtrim());
 		return code;
+	}
+
+	/** a build's output, line by line, to the same stream of this (or the log) **/
+	static function passOn(input:haxe.io.Input, output:haxe.io.Output) {
+		try {
+			while (true) {
+				var line = input.readLine();
+				if (log != null) {
+					say(line);
+				} else {
+					output.writeString(line + "\n");
+					output.flush();
+				}
+			}
+		} catch (_:haxe.io.Eof) {}
 	}
 
 	static function compilationServerUntilStdinCloses(address:String) {
