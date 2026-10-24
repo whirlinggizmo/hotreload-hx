@@ -190,7 +190,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		}
 
 		// the first build: hot, and saying how it was made
-		var configFile = Path.join([Sys.getCwd(), ".hotreload." + Std.random(1 << 30) + ".json"]);
+		// (in the system's temporary directory: one a stopped build leaves is not left in the project)
+		var configFile = Path.join([tempDir(), "hotreload-" + Std.random(1 << 30) + ".json"]);
 		say("hotreload: build: started");
 		// with the library, whether the build names it or not
 		var code = runHaxe(build.concat(["-lib", "hotreload-hx", "-D", "hotreload", "-D", 'hotreload_config=$configFile']));
@@ -519,6 +520,16 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		for (url => dir in mounts)
 			walk(dir, url);
 		return result;
+	}
+
+	/** the system's directory for temporary files: TMPDIR, TEMP or TMP, or /tmp **/
+	static function tempDir():String {
+		for (name in ["TMPDIR", "TEMP", "TMP"]) {
+			var dir = Sys.getEnv(name);
+			if (dir != null && dir != "" && FileSystem.exists(dir))
+				return dir;
+		}
+		return FileSystem.exists("/tmp") ? "/tmp" : Sys.getCwd();
 	}
 
 	/** the directories watched, and the class paths in the project left out (its local repository's libraries) **/
