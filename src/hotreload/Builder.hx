@@ -236,7 +236,8 @@ class Builder {
 					default:
 				}
 			Context.addResource("hotreload.statics", haxe.io.Bytes.ofString(haxe.Json.stringify(statics)));
-			if (mode == JsReload)
+			// (a reload's build says it too when asked: the DevServer watches its class paths, which an edited hxml changes)
+			if (mode == JsReload && !Context.defined("hotreload_config"))
 				return;
 
 			var config:JsConfig = {

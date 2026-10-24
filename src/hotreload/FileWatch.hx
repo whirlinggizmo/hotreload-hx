@@ -34,6 +34,20 @@ class FileWatch {
 		stamps = stampAll();
 	}
 
+	/**
+		the files the list has gained or lost (a directory watched from now on, or not),
+		taken as they are: not changes
+	**/
+	public function relist() {
+		var current = stampAll();
+		for (key => stamp in current)
+			if (!stamps.exists(key))
+				stamps.set(key, stamp);
+		for (key in [for (k in stamps.keys()) k])
+			if (!current.exists(key))
+				stamps.remove(key);
+	}
+
 	/** what changed, by key, once a batch has settled; null before then **/
 	public function check():Null<Array<String>> {
 		var current = stampAll();

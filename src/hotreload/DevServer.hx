@@ -62,8 +62,9 @@ using StringTools;
 	same way), `/__hotreload_project` says the directory it was started in, and
 	`/__hotreload_stop`, asked from this machine, stops it. Ten times a
 	second it checks the project's sources for changes: the build's class paths inside its
-	directory (`-cp`), or else the main class's directory, and below. Once they've stopped
-	changing, it rebuilds, through a compilation server it starts, and the page, which is
+	directory (`-cp`), or else the main class's directory, and below, and its hxml files.
+	Once they've stopped changing, it rebuilds from the hxml as it is then (a `-lib` or a
+	`-cp` added is built with, and a class path watched), through a compilation server it starts, and the page, which is
 	waiting to hear of it, loads it. Compiler errors go to this terminal (or the log), and
 	the page keeps running what it has.
 **/
@@ -80,6 +81,14 @@ class DevServer {
 	static var project = Path.removeTrailingSlashes(Path.normalize(Sys.getCwd()));
 	static var bundleUrl:String;
 	static var config:Builder.JsConfig;
+
+	/**
+		the build's arguments, as given, and the directory they're from: every build reads
+		its hxml again, so an edited one (a -lib added, a -cp) is what the next is built from
+	**/
+	static var build:Array<String>;
+
+	static var buildCwd = Sys.getCwd();
 	static var version = 0;
 	static var failed = false;
 	static var lock = new Mutex();
@@ -105,7 +114,7 @@ class DevServer {
 			compilationServerUntilStdinCloses(args[1]);
 			return;
 		}
-		var build = [];
+		build = [];
 		var useServer = true;
 		var i = 0;
 		while (i < args.length) {
@@ -411,8 +420,8 @@ class DevServer {
 			Sys.sleep(CHECK_INTERVAL);
 			// a build starts once the sources have stopped changing (FileWatch)
 			var paths = sourceWatch.check();
-			if (paths != null)
-				rebuild(paths, compilationServer);
+			if (paths != null && rebuild(paths, compilationServer))
+				sourceWatch.relist();
 		}
 	}
 
@@ -457,21 +466,36 @@ class DevServer {
 		return result;
 	}
 
-	static function rebuild(changed:Array<String>, compilationServer:String) {
+	/** a build, of the changed files; whether the directories watched changed with it **/
+	static function rebuild(changed:Array<String>, compilationServer:String):Bool {
 		say('hotreload: building (${[for (p in changed) relative(p)].join(", ")} changed)');
 		var start = haxe.Timer.stamp();
 		lock.acquire();
 		var next = version + 1;
 		lock.release();
-		// the changed files through a file, whose path (a define) is the same each build
+		// the changed sources through a file, whose path (a define) is the same each build, as
+		// is the one the build says how it was made in
 		var list = Path.join([Path.directory(config.js), ".hotreload-changed"]);
-		File.saveContent(list, changed.join("\n"));
-		var args = config.args.concat(["-D", "hotreload_reload", "-D", 'hotreload_invalidate=$list']);
+		File.saveContent(list, [for (p in changed) if (p.endsWith(".hx")) p].join("\n"));
+		var configFile = Path.join([Path.directory(config.js), ".hotreload-config.json"]);
+		var args = ["--cwd", buildCwd].concat(build).concat(["-lib", "hotreload-hx", "-D", "hotreload", "-D", "hotreload_reload",
+			"-D", 'hotreload_invalidate=$list', "-D", 'hotreload_config=$configFile']);
 		for (d in reloadDefines)
 			args = args.concat(["-D", d]);
 		if (compilationServer != null)
 			args = ["--connect", compilationServer].concat(args);
-		var code = runHaxe(["--cwd", config.cwd].concat(args));
+		var code = runHaxe(args);
+		// its class paths, which an edited hxml may have changed: the ones watched from now on
+		var relisted = false;
+		if (code == 0 && FileSystem.exists(configFile)) {
+			var made:Builder.JsConfig = try haxe.Json.parse(File.getContent(configFile)) catch (_) null;
+			try FileSystem.deleteFile(configFile) catch (_) {}
+			if (made != null && made.dirs.join("|") != config.dirs.join("|")) {
+				config.dirs = made.dirs;
+				relisted = true;
+				say('hotreload: watching ${[for (d in config.dirs) relative(d) + "/"].join(", ")}');
+			}
+		}
 		lock.acquire();
 		if (code == 0) {
 			stamp(next);
@@ -483,6 +507,7 @@ class DevServer {
 		lock.release();
 		var ms = Math.round((haxe.Timer.stamp() - start) * 1000);
 		say(code == 0 ? 'hotreload: built in $ms ms; the page loads it next' : "hotreload: build failed; the page keeps what it has");
+		return relisted;
 	}
 
 	/**
@@ -509,6 +534,28 @@ class DevServer {
 		}
 		for (d in config.dirs)
 			walk(d);
+		for (f in hxmlFiles())
+			result.set(f, f);
+		return result;
+	}
+
+	/** the build's hxml files, and the ones they name, read from where the build starts **/
+	static function hxmlFiles():Array<String> {
+		var result = [];
+		function add(file:String) {
+			var path = Path.normalize(Path.isAbsolute(file) ? file : Path.join([buildCwd, file]));
+			if (result.contains(path) || !FileSystem.exists(path))
+				return;
+			result.push(path);
+			for (line in (try File.getContent(path) catch (_) "").split("\n")) {
+				line = line.trim();
+				if (line.endsWith(".hxml") && !line.startsWith("-") && !line.startsWith("#"))
+					add(line);
+			}
+		}
+		for (a in build)
+			if (a.endsWith(".hxml"))
+				add(a);
 		return result;
 	}
 

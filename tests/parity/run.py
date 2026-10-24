@@ -22,6 +22,8 @@ statics:
 - hotreload-hx's own classes are never the project's, even with its src/ among the
   project's class paths: not warned about;
 - the DevServer shows a build's warnings as the build finishes, not when it stops;
+- the DevServer builds from its hxml as it is now: a class path added to an hxml the
+  build names (or one it names) while it runs is built with, and watched;
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
@@ -191,6 +193,33 @@ def dev_output():
         server.stop()
 
 
+def dev_relist():
+    """the DevServer building a copy of relist/, while a class path is added to its
+    common.hxml and then used: whether that build worked, and the new path is watched"""
+    print("\n== the DevServer's build, with an hxml edited as it runs")
+    work = os.path.join(HERE, "out", "relist")
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(HERE, "relist"), work)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = Program(work, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
+                     os.path.join(LOGS, "dev-relist.log"))
+    try:
+        if not server.wait(r"hotreload: watching", timeout=120):
+            return False
+        edit(os.path.join(work, "common.hxml"), "-cp src", "-cp src\n-cp extra")
+        if not server.wait(r"hotreload: built|build failed", timeout=60):
+            return False
+        if "hotreload: watching src/, extra/" not in open(server.log).read():
+            print("    !! extra/ isn't watched")
+            return False
+        edit(os.path.join(work, "src", "Use.hx"), '"v1"', 'Extra.hi()')
+        return (server.wait(r"hotreload: built|build failed", timeout=60) or "").startswith("hotreload: built")
+    finally:
+        server.stop()
+
+
 def server(target):
     """the program built through a compilation server, as the DevServer and an editor do:
     four builds, the later ones from the server's cache, into an output directory that
@@ -252,6 +281,9 @@ def check(name, result):
     if result["own"]:
         print(f"  FAILED {name}, hotreload-hx's src/ as a project class path: {result['own']!r}")
         failures += 1
+    if result.get("dev_relist") is False:
+        print(f"  FAILED {name}: the DevServer didn't build with a class path added to its hxml as it ran")
+        failures += 1
     if result.get("dev_output") is False:
         print(f"  FAILED {name}: the DevServer's build warnings didn't come before it served")
         failures += 1
@@ -273,6 +305,7 @@ if __name__ == "__main__":
         results[t]["own"] = own(t)
         if t == "js":
             results[t]["dev_output"] = dev_output()
+            results[t]["dev_relist"] = dev_relist()
         results[t]["server"] = server(t)
     print("\n== results")
     failures = sum(check(t, r) for t, r in results.items())

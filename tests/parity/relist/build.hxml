@@ -1,0 +1,3 @@
+# the hxml-edit test: build.hxml names common.hxml, which the test adds a class path to
+common.hxml
+--js out/main.js
