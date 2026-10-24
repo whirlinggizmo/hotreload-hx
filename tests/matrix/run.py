@@ -130,7 +130,7 @@ def js():
     game = os.path.join(HERE, "src", "Game.hx")
     p = None
     try:
-        if not server.wait(r"hotreload: serving", timeout=120, show=False):
+        if not server.wait(r"hotreload: ready", timeout=120, show=False):
             sys.exit("the DevServer didn't start")
         env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
         p = Program(HERE, ["node", "out/js/main.js"], os.path.join(LOGS, "js.log"), env=env)

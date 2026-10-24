@@ -66,6 +66,9 @@ class Builder {
 	/** the project's own class paths: its code, whose plain statics start over on a reload, on both targets **/
 	static var projectDirs:Array<String> = [];
 
+	/** the class paths inside the project's directory left out of it: its local repository's libraries **/
+	static var excludedDirs:Array<String> = [];
+
 	/** the main class's file, found from the class paths: never reloaded code **/
 	static var mainFile:String;
 
@@ -244,6 +247,7 @@ class Builder {
 				cwd: cwd,
 				args: [for (a in args) a],
 				dirs: projectDirs,
+				excluded: excludedDirs,
 				js: Path.normalize(absolute(cwd, js)),
 				mainClass: mainClass,
 			};
@@ -263,19 +267,21 @@ class Builder {
 	static function findProject(args:Array<String>, cwd:String) {
 		mainFile = try Path.normalize(FileSystem.absolutePath(Context.resolvePath(mainClass.replace(".", "/") + ".hx"))) catch (_) null;
 		var dirs = [];
+		var excluded = [];
 		var j = 0;
 		while (j < args.length) {
 			if ((args[j] == "-cp" || args[j] == "-p" || args[j] == "--class-path") && j + 1 < args.length) {
 				var dir = Path.removeTrailingSlashes(Path.normalize(absolute(cwd, args[j + 1])));
 				var library = (dir + "/").contains("/.haxelib/");
-				if (dir.startsWith(Path.removeTrailingSlashes(cwd)) && !library && FileSystem.exists(dir) && !dirs.contains(dir))
-					dirs.push(dir);
+				if (dir.startsWith(Path.removeTrailingSlashes(cwd)) && FileSystem.exists(dir) && !dirs.contains(dir) && !excluded.contains(dir))
+					(library ? excluded : dirs).push(dir);
 			}
 			j++;
 		}
 		if (dirs.length == 0 && mainFile != null)
 			dirs.push(Path.directory(mainFile));
 		projectDirs = dirs;
+		excludedDirs = excluded;
 	}
 
 	/** whether a class is the project's own code, but the main class: one whose plain statics start over on a reload **/
@@ -1201,6 +1207,9 @@ typedef JsConfig = {
 
 	/** where the sources are: the project's own class paths, watched, and below **/
 	var dirs:Array<String>;
+
+	/** the class paths inside the project's directory that aren't its own: its local repository's libraries (.haxelib/) **/
+	var ?excluded:Array<String>;
 
 	/** the bundle **/
 	var js:String;

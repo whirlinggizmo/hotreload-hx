@@ -407,7 +407,8 @@ stops with the compiler however that ends:
 
 `mounts` serves directories besides the build's output, such as assets; the sources it
 watches are the build's own class paths (`-cp`), not its libraries', even in a local
-repository (`haxelib newrepo`'s `.haxelib/`) inside the project. With `background: true`, `serve` returns
+repository (`haxelib newrepo`'s `.haxelib/`) inside the project (`hotreload: watch:
+excluding` names those). With `background: true`, `serve` returns
 once the server is serving and leaves it running, detached from the terminal, its messages
 in `.hotreload-<port>.log` (or `log`), until it's stopped:
 
@@ -476,7 +477,8 @@ class Main {
 
 ```
 hotreload: serving http://localhost:8080/ (/home/you/game/web)
-hotreload: watching src/
+hotreload: watch: including src/
+hotreload: ready
 ```
 
 Options:

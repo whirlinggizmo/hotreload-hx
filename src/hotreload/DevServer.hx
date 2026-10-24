@@ -227,11 +227,10 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		}
 		var compilationServer = useServer ? startCompilationServer() : null;
 		Thread.create(() -> serveRequests(loop, server));
-		var dirs = [for (d in config.dirs) relative(d) + "/"];
 		say('hotreload: serving http://localhost:$port/ ($root)');
 		for (url => dir in mounts)
 			say('hotreload: and $dir at $url/');
-		say('hotreload: watching ${dirs.join(", ")}');
+		sayWatch();
 		Thread.create(watchAssets);
 		watch(compilationServer);
 		// (the serving loop stops them as it stops, a few seconds at most)
@@ -360,7 +359,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		while (true) {
 			loop.run(NOWAIT);
 			said = try File.getContent(logFile) catch (_) "";
-			if (exited || said.contains("hotreload: watching"))
+			if (exited || said.contains("hotreload: ready"))
 				break;
 			Sys.sleep(0.1);
 		}
@@ -470,6 +469,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 
 	static function watch(compilationServer:String) {
 		var sourceWatch = new FileWatch(sources);
+		// (after the sources' first stamps: a save from here on is a change. What a script waits for)
+		say("hotreload: ready");
 		while (running) {
 			Sys.sleep(CHECK_INTERVAL);
 			// a build starts once the sources have stopped changing (FileWatch)
@@ -520,6 +521,14 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		return result;
 	}
 
+	/** the directories watched, and the class paths in the project left out (its local repository's libraries) **/
+	static function sayWatch() {
+		say('hotreload: watch: including ${[for (d in config.dirs) relative(d) + "/"].join(", ")}');
+		var excluded = config.excluded == null ? [] : config.excluded;
+		if (excluded.length > 0)
+			say('hotreload: watch: excluding ${[for (d in excluded) relative(d) + "/"].join(", ")} (libraries in the project\'s .haxelib/)');
+	}
+
 	/** a build, of the changed files; whether the directories watched changed with it **/
 	static function rebuild(changed:Array<String>, compilationServer:String):Bool {
 		say('hotreload: building (${[for (p in changed) relative(p)].join(", ")} changed)');
@@ -544,10 +553,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		if (code == 0 && FileSystem.exists(configFile)) {
 			var made:Builder.JsConfig = try haxe.Json.parse(File.getContent(configFile)) catch (_) null;
 			try FileSystem.deleteFile(configFile) catch (_) {}
-			if (made != null && made.dirs.join("|") != config.dirs.join("|")) {
+			if (made != null && (made.dirs.join("|") != config.dirs.join("|") || Std.string(made.excluded) != Std.string(config.excluded))) {
 				config.dirs = made.dirs;
+				config.excluded = made.excluded;
 				relisted = true;
-				say('hotreload: watching ${[for (d in config.dirs) relative(d) + "/"].join(", ")}');
+				sayWatch();
 			}
 		}
 		lock.acquire();

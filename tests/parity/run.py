@@ -106,7 +106,7 @@ def js():
     server = Program(HERE, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build-js.hxml"], server_log)
     p = None
     try:
-        if not server.wait(r"hotreload: serving", timeout=120, show=False):
+        if not server.wait(r"hotreload: ready", timeout=120, show=False):
             sys.exit("the DevServer didn't start")
         env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
         log = os.path.join(LOGS, "js.log")
@@ -220,10 +220,10 @@ def dev_output():
                 print("    | " + l)
                 if "passed as a value" in l:
                     warned = True
-            if any("hotreload: serving" in l for l in lines):
+            if any("hotreload: ready" in l for l in lines):
                 return warned
             time.sleep(0.02)
-        print("    !! timed out waiting for hotreload: serving")
+        print("    !! timed out waiting for hotreload: ready")
         return False
     finally:
         server.stop()
@@ -242,12 +242,12 @@ def dev_relist():
     server = Program(work, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
                      os.path.join(LOGS, "dev-relist.log"))
     try:
-        if not server.wait(r"hotreload: watching", timeout=120):
+        if not server.wait(r"hotreload: ready", timeout=120):
             return False
         edit(os.path.join(work, "common.hxml"), "-cp src", "-cp src\n-cp extra")
         if not server.wait(r"hotreload: built|build failed", timeout=60):
             return False
-        if "hotreload: watching src/, extra/" not in open(server.log).read():
+        if "hotreload: watch: including src/, extra/" not in open(server.log).read():
             print("    !! extra/ isn't watched")
             return False
         edit(os.path.join(work, "src", "Use.hx"), '"v1"', 'Extra.hi()')
