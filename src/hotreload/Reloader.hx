@@ -90,12 +90,12 @@ class Reloader {
 	public function new() {
 		var json = haxe.Resource.getString("hotreload.config");
 		if (json == null) {
-			Sys.println("hotreload: this build has no reload config: build it with --macro hotreload.Builder.init() (or -lib hotreload-hx)");
+			Sys.println("hotreload: reload: no reload config in this build; build it with --macro hotreload.Builder.init() (or -lib hotreload-hx)");
 			return;
 		}
 		config = haxe.Json.parse(json);
 		if (config.roots.length == 0) {
-			Sys.println("hotreload: nothing to reload: no class has @:hot statics or functions, or reload hooks");
+			Sys.println("hotreload: reload: nothing to reload (no class has @:hot statics or functions, or reload hooks)");
 			config = null;
 			return;
 		}
@@ -107,7 +107,7 @@ class Reloader {
 		outsideWatch = new FileWatch(outsideSources);
 		var names = [for (root in config.roots) root.split(".").join("/") + ".hx"];
 		var dirs = [for (d in config.dirs) relative(d) + "/"];
-		Sys.println('hotreload: watching for changes to ${names.join(", ")} and the rest of ${dirs.join(", ")}');
+		Sys.println('hotreload: watch: including ${dirs.join(", ")} (reloaded: ${names.join(", ")})');
 		server = startServer();
 		if (server != null) {
 			// a build now, which isn't swapped in: the server has the code parsed and typed
@@ -127,7 +127,7 @@ class Reloader {
 			return;
 		assetDirs.push(dir);
 		assetWatch = new FileWatch(assets);
-		Sys.println('hotreload: watching the assets in $dir/');
+		Sys.println('hotreload: assets: watching $dir/');
 	}
 
 	/** stops the compilation server this started, if it did **/
@@ -158,7 +158,7 @@ class Reloader {
 				else if (code == 0)
 					swap(building);
 				else
-					Sys.println("hotreload: build failed; still running the last one");
+					Sys.println("hotreload: build: failed (continuing with last successful build)");
 				// a module is read into memory whole, so its file goes as soon as it's loaded:
 				// however the program stops (Ctrl-C runs no exit code), no module is left behind
 				removeFile(building);
@@ -173,7 +173,7 @@ class Reloader {
 			return;
 		var outside = outsideWatch.check();
 		if (outside != null)
-			Sys.println('hotreload: ${[for (p in outside) relative(p)].join(", ")} changed, outside the reloaded code: restart to run it');
+			Sys.println('hotreload: reload: ${[for (p in outside) relative(p)].join(", ")} changed outside the reloaded code; restart to run it');
 		// a build starts once the sources have stopped changing (FileWatch)
 		var paths = sourceWatch.check();
 		if (paths == null)
@@ -197,12 +197,12 @@ class Reloader {
 		var paths = assetWatch.check();
 		if (paths == null)
 			return;
-		Sys.println('hotreload: ${paths.join(", ")} changed');
+		Sys.println('hotreload: assets: changed (${paths.join(", ")})');
 		if (assetsChanged != null)
 			try
 				assetsChanged(paths)
 			catch (e)
-				Sys.println('hotreload: assetsChanged failed: $e');
+				Sys.println('hotreload: assets: assetsChanged failed ($e)');
 	}
 
 	/** the modules an earlier run left, if it stopped while one was building **/
@@ -299,10 +299,10 @@ class Reloader {
 	}
 
 	function startBuild() {
-		var why = changed.join(", ") + " changed";
+		var why = changed.join(", ");
 		changed = [];
 		version++;
-		Sys.println('hotreload: building ($why)');
+		Sys.println('hotreload: build: started ($why)');
 		runBuild(config.buildDir + "/" + config.mainClass.toLowerCase() + "_" + version + ".cppia");
 	}
 
@@ -324,7 +324,7 @@ class Reloader {
 		args = args.concat(["-D", 'hotreload_invalidate=$list']);
 		changedPaths = [];
 		if (serverProcess != null && serverProcess.exitCode(false) != null) {
-			Sys.println("hotreload: the compilation server stopped; building without it");
+			Sys.println("hotreload: compilation server: stopped (building without one)");
 			dispose();
 		}
 		var server = server;
@@ -351,7 +351,7 @@ class Reloader {
 		try {
 			serverProcess = Sys.systemName() == "Windows" ? new Process("haxe", ["--wait", address]) : new Process("sh", ["-c", SERVER_WATCHDOG, "sh", address]);
 		} catch (e) {
-			Sys.println('hotreload: can\'t start a compilation server ($e); building without one');
+			Sys.println('hotreload: compilation server: not started ($e; building without one)');
 			return null;
 		}
 		return address;
@@ -388,13 +388,13 @@ class Reloader {
 				Sys.sleep(0.05);
 			}
 		}
-		Sys.println('hotreload: no compilation server at $address; building without it');
+		Sys.println('hotreload: compilation server: none at $address (building without one)');
 		return false;
 	}
 
 	function swap(path:String) {
 		var module = try cpp.cppia.Module.fromData(File.getBytes(path).getData()) catch (e) {
-			Sys.println('hotreload: can\'t load ${relative(path)}: $e');
+			Sys.println('hotreload: reload: cannot load ${relative(path)} ($e)');
 			return;
 		}
 
@@ -416,8 +416,7 @@ class Reloader {
 				changedSigs.push(key);
 		}
 		if (changedSigs.length > 0) {
-			Sys.println('hotreload: ${changedSigs.join(", ")}${changedSigs.length == 1 ? "'s" : "'"} signature changed: '
-				+ "restart to run the new code (the last still runs)");
+			Sys.println('hotreload: reload: signature changed (${changedSigs.join(", ")}); restart to run the new code');
 			return;
 		}
 
@@ -439,7 +438,7 @@ class Reloader {
 		try {
 			module.boot();
 		} catch (e) {
-			Sys.println('hotreload: ${relative(path)} failed as it started: $e');
+			Sys.println('hotreload: reload: ${relative(path)} failed to start ($e)');
 			return;
 		}
 		// modules stay loaded: what old code handed out (a callback) still runs it
@@ -455,7 +454,7 @@ class Reloader {
 			if (impl == null) {
 				var key = proc.className + "." + proc.name;
 				if (!gone.exists(key))
-					Sys.println('hotreload: $key is gone from the new code: its last version runs on');
+					Sys.println('hotreload: reload: $key removed from the new code (last version still runs)');
 				gone.set(key, true);
 				continue;
 			}
@@ -464,7 +463,7 @@ class Reloader {
 		Hooks.runAfter(); // the new code's
 		if (afterReload != null)
 			afterReload();
-		Sys.println('hotreload: reloaded (${Path.withoutDirectory(path)})');
+		Sys.println('hotreload: reload: done (${Path.withoutDirectory(path)})');
 	}
 
 	/** a path from the build's directory, for messages **/

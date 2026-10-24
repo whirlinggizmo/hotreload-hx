@@ -23,9 +23,9 @@ class Slots {
 		if (slot.sig != sig) {
 			var fresh = first();
 			if (Slot.sameKind(slot.value, fresh)) {
-				Sys.println('hotreload: $key\'s type changed (${slot.sig} to $sig); carried over what still fits');
+				Sys.println('hotreload: static: $key carried over (type changed: ${slot.sig} to $sig)');
 			} else {
-				Sys.println('hotreload: $key\'s type changed (${slot.sig} to $sig); started over from its first value');
+				Sys.println('hotreload: static: $key started over (type changed: ${slot.sig} to $sig)');
 				slot.value = fresh;
 			}
 			slot.sig = sig;

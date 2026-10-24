@@ -130,7 +130,7 @@ class Builder {
 		} else if (Context.defined("hotreload")) {
 			if (!Context.defined("cpp") || Context.defined("cppia")) {
 				// (an init macro's warning isn't shown)
-				Sys.stderr().writeString("hotreload: only a cpp or a JS build reloads; this one builds without it\n");
+				Sys.stderr().writeString("hotreload: build: not hot (only a cpp or a JS build reloads)\n");
 				Sys.stderr().flush();
 				return;
 			}
@@ -436,8 +436,8 @@ class Builder {
 					var marked = cf.meta.has(":hot") || mainCalls.exists(full) || mainCalls.exists(c.name + "." + cf.name)
 						|| c.statics.get().exists(s -> s.name == "__hot_sig_" + cf.name);
 					if (!marked)
-						Context.warning('hotreload: the main class calls ${c.name}.${cf.name} in a way the build can\'t see (through an alias?), so it isn\'t @:hot: '
-							+ "mark it yourself, or a native reload won't reach it", e.pos);
+						Context.warning('hotreload: the main class calls ${c.name}.${cf.name} in a way the build cannot see (through an alias, say), so it is not @:hot: '
+							+ "mark it yourself, or a native reload will not reach it", e.pos);
 				}
 			default:
 		}
@@ -506,7 +506,7 @@ class Builder {
 			if (file == mainFile || !inside(file, dirs))
 				continue;
 			if (base.meta.has(":native")) {
-				Context.warning('hotreload: ${fullName(base.pack, base.name)} has @:native, so it can\'t be reloaded', base.pos);
+				Context.warning('hotreload: ${fullName(base.pack, base.name)} has @:native, so it cannot be reloaded', base.pos);
 				continue;
 			}
 			base.meta.add(":native", [macro $v{HOST_PREFIX + fullName(base.pack, base.name)}], base.pos);
@@ -631,7 +631,7 @@ class Builder {
 	**/
 	static function checkHot(cls:ClassType, field:Field, hook:MetadataEntry) {
 		if (isMain(cls))
-			Context.error("@:hot and the reload hooks can't be used in the main class because the main class is never reloaded. "
+			Context.error("@:hot and the reload hooks cannot be used in the main class because the main class is never reloaded. "
 				+ "Use them in the reloaded classes (for the main class's own, set reloader.beforeReload and reloader.afterReload)", field.pos);
 		if (!field.access.contains(AStatic))
 			Context.error("@:hot and the reload hooks are for statics: an instance is carried across a reload with its fields", field.pos);
@@ -664,7 +664,7 @@ class Builder {
 		if (t == null)
 			t = writtenType(e);
 		if (t == null)
-			Context.error("@:hot: give it a type (its first value doesn't say it: a literal, `new T()` or a cast would)", field.pos);
+			Context.error("@:hot: give it a type (its first value does not say it: a literal, `new T()` or a cast would)", field.pos);
 		return {t: t, sig: try Context.resolveType(t, field.pos).toString() catch (_) t.toString()};
 	}
 
@@ -748,7 +748,7 @@ class Builder {
 	static function hotFunction(className:String, field:Field, f:Function, result:Array<Field>, extra:Array<Field>) {
 		var name = field.name;
 		// (the main class calls it, so a reload checks its signature, as for one marked by hand)
-		var why = isAuto(field) ? '$name is called by the main class, so it\'s @:hot: ' : "@:hot: ";
+		var why = isAuto(field) ? '$name is called by the main class, so it is @:hot: ' : "@:hot: ";
 		if (f.params != null && f.params.length > 0)
 			Context.error(why + "not a generic function", field.pos);
 		var argTypes = [];
@@ -757,7 +757,7 @@ class Builder {
 			if (t == null)
 				t = writtenType(a.value);
 			if (t == null)
-				Context.error(why + 'give ${a.name} a type: a reload checks it hasn\'t changed', field.pos);
+				Context.error(why + 'give ${a.name} a type: a reload checks it has not changed', field.pos);
 			if (t.match(TPath({name: "Rest", pack: ["haxe"] | []})))
 				Context.error(why + "not a function with rest arguments", field.pos);
 			argTypes.push((a.opt ? "?" : "") + t.toString());
@@ -765,7 +765,7 @@ class Builder {
 		var ret = f.ret;
 		if (ret == null) {
 			if (returnsValue(f.expr))
-				Context.error(why + "give it a return type: a reload checks it hasn't changed", field.pos);
+				Context.error(why + "give it a return type: a reload checks it has not changed", field.pos);
 			ret = macro:Void;
 		}
 		var sig = "(" + argTypes.join(", ") + ") -> " + ret.toString();

@@ -105,7 +105,7 @@ class Migrate {
 				try {
 					return Type.createEnum(ne, Type.enumConstructor(v), params);
 				} catch (_) {
-					Sys.println('hotreload: ${Type.getEnumName(e)}.${Type.enumConstructor(v)} is gone from the new code; kept the old value');
+					Sys.println('hotreload: enum: ${Type.getEnumName(e)}.${Type.enumConstructor(v)} removed from the new code (old value kept)');
 					return v;
 				}
 			default:

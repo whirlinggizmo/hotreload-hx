@@ -350,7 +350,7 @@ def edit_and_wait(prog, builder, path, old, new, expect, timeout):
     assert old in text, f"{path} has no {old!r}"
     t0 = time.time()
     save(path, text.replace(old, new))
-    tb, _ = builder.wait(r"hotreload: building", timeout)
+    tb, _ = builder.wait(r"hotreload: build: started", timeout)
     tr, _ = prog.wait(re.escape(expect), timeout)
     if tb is None or tr is None:
         return None
@@ -390,7 +390,7 @@ def run(kind, n, args, tag, root, game, deep):
         port = free_port()
         server = Log(root, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
                      os.path.join(LOGS, f"{tag}-server.log"))
-        if server.wait(r"hotreload: serving", args.timeout)[0] is None:
+        if server.wait(r"hotreload: ready", args.timeout)[0] is None:
             sys.exit("the DevServer didn't start")
         env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
         prog = Log(root, ["node", "out/js/main.js"], os.path.join(LOGS, f"{tag}.log"), env=env)

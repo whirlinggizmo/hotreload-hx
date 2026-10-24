@@ -51,8 +51,8 @@ EXPECTED = {
     # the completion v2 made (by a module, natively) reaches v3's onLoaded
     "v3": "report v3 kept=5 doubled=10 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v3:8",
     "types": [
-        "hotreload: game.State.label's type changed (Int to String); started over from its first value",
-        "hotreload: game.State.widened's type changed (Int to Float); carried over what still fits",
+        "hotreload: static: game.State.label started over (type changed: Int to String)",
+        "hotreload: static: game.State.widened carried over (type changed: Int to Float)",
     ],
 }
 
@@ -89,7 +89,7 @@ def cpp():
         result = scenario(p, [log])
         # native only: an edit outside the reloaded code (Outside isn't in the module) is told, and needs a restart
         edit(OUTSIDE, "public static var count = 0;", "public static var count = 0; // edited")
-        result["restart"] = p.wait(r"outside the reloaded code: restart", timeout=60, show=False) is not None
+        result["restart"] = p.wait(r"outside the reloaded code; restart", timeout=60, show=False) is not None
         return result
     finally:
         p.stop()
@@ -245,13 +245,13 @@ def dev_relist():
         if not server.wait(r"hotreload: ready", timeout=120):
             return False
         edit(os.path.join(work, "common.hxml"), "-cp src", "-cp src\n-cp extra")
-        if not server.wait(r"hotreload: built|build failed", timeout=60):
+        if not server.wait(r"hotreload: build: (done|failed)", timeout=60):
             return False
         if "hotreload: watch: including src/, extra/" not in open(server.log).read():
             print("    !! extra/ isn't watched")
             return False
         edit(os.path.join(work, "src", "Use.hx"), '"v1"', 'Extra.hi()')
-        return (server.wait(r"hotreload: built|build failed", timeout=60) or "").startswith("hotreload: built")
+        return (server.wait(r"hotreload: build: (done|failed)", timeout=60) or "").startswith("hotreload: build: done")
     finally:
         server.stop()
 
@@ -290,7 +290,7 @@ def server(target):
 
 
 WARNINGS = sorted([
-    "warn/Main.hx:11: characters 3-12 : Warning : hotreload: the main class calls Warn.later in a way the build can't see (through an alias?), so it isn't @:hot: mark it yourself, or a native reload won't reach it",
+    "warn/Main.hx:11: characters 3-12 : Warning : hotreload: the main class calls Warn.later in a way the build cannot see (through an alias, say), so it is not @:hot: mark it yourself, or a native reload will not reach it",
     "warn/Main.hx:12: characters 14-24 : Warning : hotreload: later passed as a value keeps its old code after a reload; call it from a lambda, x -> later(x)",
     "warn/Warn.hx:14: characters 8-15 : Warning : hotreload: place passed as a value keeps its old code after a reload; call it from a lambda, x -> place(x)",
     "warn/Warn.hx:15: characters 8-16 : Warning : hotreload: placeAll passed as a value keeps its old code after a reload; call it from a lambda, x -> placeAll(x)",

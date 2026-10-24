@@ -72,7 +72,7 @@ If a reload changes a `@:hot` static's type, its value is kept when it's still t
 (number, bool, string, object), and reset otherwise, with a message:
 
 ```
-hotreload: game.State.label's type changed (Int to String); started over from its first value
+hotreload: static: game.State.label started over (type changed: Int to String)
 ```
 
 `@:hot` takes a static var, or a static function ([Callbacks](#callbacks)). A var needs a
@@ -240,9 +240,9 @@ It prints a greeting a few times a second. Change the greeting in `src/Hello.hx`
 
 ```
 Hello, world! (ticks: 12, since the last reload: 12)
-hotreload: building (src/Hello.hx changed)
+hotreload: build: started (src/Hello.hx)
 hello: reloaded
-hotreload: reloaded (main_1.cppia)
+hotreload: reload: done (main_1.cppia)
 Howdy, world! (ticks: 16, since the last reload: 1)
 ```
 
@@ -251,7 +251,7 @@ starts over. The greeting's first word comes from `assets/greeting.txt`; edit it
 next greeting uses it, with nothing rebuilt:
 
 ```
-hotreload: assets/greeting.txt changed
+hotreload: assets: changed (assets/greeting.txt)
 hello: the greeting is now "Howdy"
 ```
 
@@ -286,7 +286,7 @@ the `@:hot` functions at the new code. So a swap never happens in the middle of 
 - A `@:hot` function whose signature changed is refused with a message, and the old code
   runs on until a restart. The same goes for adding or renaming one.
 - An edit outside the reloaded code is reported, and needs a restart:
-  `hotreload: src/Main.hx changed, outside the reloaded code: restart to run it`.
+  `hotreload: reload: src/Main.hx changed outside the reloaded code; restart to run it`.
 - Module files are deleted as soon as they're loaded, so none are left behind, even after
   Ctrl-C.
 
@@ -476,7 +476,7 @@ class Main {
 ```
 
 ```
-hotreload: serving http://localhost:8080/ (/home/you/game/web)
+hotreload: serve: http://localhost:8080/ (web)
 hotreload: watch: including src/
 hotreload: ready
 ```

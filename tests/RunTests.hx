@@ -34,36 +34,36 @@ class RunTests {
 
 		try {
 			step("it runs the code it was built with");
-			expect(~/^hotreload: watching for changes to Game.hx/);
+			expect(~/^hotreload: watch: including .*\(reloaded: Game\.hx/);
 			var v1 = expect(~/^v1 ticks=(\d+) hp3,hp5 mood=Happy\(1\) label=7 cycle=true map=true isEnemy=true isMood=true$/);
 			var ticks = Std.parseInt(v1.matched(1));
 
 			step("a reload runs the new code, with the hot statics carried over, and new fields (a final too) from their initializers");
 			copyVersion("v2");
-			expect(~/^hotreload: building/);
+			expect(~/^hotreload: build: started/);
 			expect(~/^before: v1$/);
 			expect(~/^main: beforeReload$/);
 			expect(~/^after: v2$/);
 			expect(~/^main: afterReload$/);
-			expect(~/^hotreload: reloaded/);
+			expect(~/^hotreload: reload: done/);
 			var v2 = expect(~/^v2 ticks=(\d+) hp3\/s10\/r2,hp5\/s10\/r2 mood=Happy\(1\) label=7 cycle=true map=true isEnemy=true isMood=true$/);
 			check(Std.parseInt(v2.matched(1)) > ticks, "ticks counts on through the reload");
 
 			step("a hot static whose type changed to another kind starts over");
 			edit("Game.hx", "@:hot static var label = 7;", "@:hot static var label = \"seven\";");
-			expect(~/^hotreload: Game.label's type changed \(Int to String\); started over/);
+			expect(~/^hotreload: static: Game\.label started over \(type changed: Int to String\)$/);
 			expect(~/^v2 ticks=\d+ hp3\/s10\/r2,hp5\/s10\/r2 mood=Happy\(1\) label=seven /);
 
 			step("a @:hot function whose signature changed is refused, and the last code runs on");
 			edit("Game.hx", "public static function tick()", "public static function tick(n:Int = 1)");
-			expect(~/^hotreload: Game.tick's signature changed: restart to run the new code/);
+			expect(~/^hotreload: reload: signature changed \(Game\.tick\); restart to run the new code$/);
 			expect(~/^v2 ticks=\d+ .* label=seven /);
 			edit("Game.hx", "public static function tick(n:Int = 1)", "public static function tick()");
-			expect(~/^hotreload: reloaded/);
+			expect(~/^hotreload: reload: done/);
 
 			step("a build that fails leaves the last code running");
 			edit("Game.hx", "static function describe() {", "static function describe() { oops");
-			expect(~/^hotreload: build failed; still running the last one$/);
+			expect(~/^hotreload: build: failed \(continuing with last successful build\)$/);
 			expect(~/^v2 ticks=/);
 
 			step("the next good build reloads");
@@ -73,7 +73,7 @@ class RunTests {
 
 			step("a second save in the same second as the first is built too");
 			edit("Game.hx", "'v3 ticks", "'v4 ticks");
-			expect(~/^hotreload: building/);
+			expect(~/^hotreload: build: started/);
 			edit("Game.hx", "'v4 ticks", "'v5 ticks");
 			expect(~/^v5 ticks=/);
 

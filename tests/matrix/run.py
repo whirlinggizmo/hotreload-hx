@@ -25,7 +25,7 @@ def step(name):
 def build(cwd, args):
     print(f"building {' '.join(args)} in {os.path.relpath(cwd, HERE) or '.'}")
     if subprocess.run(["haxe"] + args, cwd=cwd, stdout=subprocess.DEVNULL).returncode != 0:
-        sys.exit("the build failed")
+        sys.exit("the build: failed")
 
 
 def fresh_sources():
@@ -50,51 +50,51 @@ def matrix():
 
         step("v2: S1-S5, S7-S12, S14 at once (see v2/)")
         install(os.path.join(HERE, "v2"), os.path.join(HERE, "src"))
-        p.wait(r"^report v2|build failed")
+        p.wait(r"^report v2|build: failed")
         time.sleep(1.2)
         held = [l for l in open(os.path.join(LOGS, "matrix.log")) if l.startswith("main:")]
         print("    | " + held[-1].strip() + "   (S10, S14: kept by the main class)")
 
         step("S6: a hot static's type, Int -> String")
         edit(game, "@:hot static var label = 7;", '@:hot static var label = "seven";')
-        p.wait(r"^report v2|build failed")
+        p.wait(r"^report v2|build: failed")
 
         step("S13: a @:hot function's signature, then back")
         edit(game, "@:hot public static function tick()", "@:hot public static function tick(n:Int = 1)")
-        p.wait(r"signature changed|reloaded|build failed")
+        p.wait(r"signature changed|reload: done|build: failed")
         edit(game, "@:hot public static function tick(n:Int = 1)", "@:hot public static function tick()")
-        p.wait(r"^report v2|build failed")
+        p.wait(r"^report v2|build: failed")
 
         step("S15: a compile error, then the fix")
         edit(game, "static function report() {", "static function report() { oops")
-        p.wait(r"build failed|reloaded")
+        p.wait(r"build: failed|reload: done")
         edit(game, "static function report() { oops", "static function report() {")
-        p.wait(r"^report v2|build failed")
+        p.wait(r"^report v2|build: failed")
 
         step("S17: a C call through untyped __cpp__")
         line = "\n\t\tSys.println('S17=' + untyped __cpp__('abs(-3)'));"
         edit(game, "static function report() {", "static function report() {" + line)
-        p.wait(r"^report v2|build failed|can't load|failed as it started")
+        p.wait(r"^report v2|build: failed|cannot load|failed to start")
         edit(game, line, "")
-        p.wait(r"^report v2|build failed")
+        p.wait(r"^report v2|build: failed")
 
         step("S17b: a C function through an extern the executable never used")
         save(os.path.join(HERE, "src", "game", "CMath.hx"),
              'package game;\n\n@:include("stdlib.h")\nextern class CMath {\n\t@:native("abs") static function abs(x:Int):Int;\n}\n')
         line = "\n\t\tSys.println('S17b=' + game.CMath.abs(-3));"
         edit(game, "static function report() {", "static function report() {" + line)
-        p.wait(r"^report v2|build failed|can't load|failed as it started")
+        p.wait(r"^report v2|build: failed|cannot load|failed to start")
         edit(game, line, "")
-        p.wait(r"^report v2|build failed")
+        p.wait(r"^report v2|build: failed")
 
         step("S18: haxe.Json (pure Haxe), which the executable never used")
         line = "\n\t\tSys.println('S18=' + haxe.Json.parse('{\"a\":[1,2]}').a[1]);"
         edit(game, "static function report() {", "static function report() {" + line)
-        p.wait(r"^S18=|build failed|can't load|failed as it started")
+        p.wait(r"^S18=|build: failed|cannot load|failed to start")
 
         step("S18b: sys.db.Sqlite (native), which the executable never used")
         edit(game, line, "\n\t\tSys.println('S18b=' + sys.db.Sqlite.open(':memory:').request('select 6*7 as x').getIntResult(0));")
-        p.wait(r"^S18b=|build failed|can't load|failed as it started")
+        p.wait(r"^S18b=|build: failed|cannot load|failed to start")
     finally:
         p.stop()
         fresh_sources()
@@ -112,7 +112,7 @@ def perf():
             p.wait(r"^bench native", timeout=120)
             for _ in range(2):
                 edit(bench, "@:hot static var dummy = 0;", "@:hot static var dummy = 0; ")
-                p.wait(r"^bench reloaded|build failed", timeout=300)
+                p.wait(r"^bench reloaded|build: failed", timeout=300)
         finally:
             p.stop()
             edit(bench, "@:hot static var dummy = 0;  ", "@:hot static var dummy = 0;")
@@ -150,11 +150,11 @@ def js():
 
         step("S13: a @:hot function's signature")
         edit(game, "@:hot public static function tick()", "@:hot public static function tick(n:Int = 1)")
-        p.wait(r"^report v2|reloaded")
+        p.wait(r"^report v2|reload: done")
 
         step("S15: a compile error, then the fix (the terminal has the error)")
         edit(game, "static function report() {", "static function report() { oops")
-        server.wait(r"build failed", timeout=30)
+        server.wait(r"build: failed", timeout=30)
         edit(game, "static function report() { oops", "static function report() {")
         p.wait(r"^report v2")
 

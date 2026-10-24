@@ -117,7 +117,7 @@ class JsSwap {
 					busy = false;
 					Syntax.code("setTimeout({0}, 0)", ask);
 				}, (e:Dynamic) -> {
-					log('can\'t load ${info.url}: $e');
+					log('reload: cannot load ${info.url} ($e)');
 					busy = false;
 					Syntax.code("setTimeout({0}, 0)", ask);
 				});
@@ -148,7 +148,7 @@ class JsSwap {
 							try
 								r.assetsChanged(urls)
 							catch (e:Dynamic)
-								log('assetsChanged failed: $e');
+								log('assets: assetsChanged failed ($e)');
 				Syntax.code("setTimeout({0}, 0)", ask);
 			}, (_:Dynamic) -> Syntax.code("setTimeout({0}, 1000)", ask));
 		}
@@ -238,9 +238,9 @@ class JsSwap {
 					if (was != null && now != null && was != now) {
 						// the new code declares another type: what still fits is carried over (Slot.sameKind, as natively)
 						if (Slot.sameKind(value, Reflect.field(p.n, key))) {
-							log('${p.name}.$key\'s type changed ($was to $now); carried over what still fits');
+							log('static: ${p.name}.$key carried over (type changed: $was to $now)');
 						} else {
-							log('${p.name}.$key\'s type changed ($was to $now); started over from its first value');
+							log('static: ${p.name}.$key started over (type changed: $was to $now)');
 							fresh++;
 							continue;
 						}
@@ -277,7 +277,7 @@ class JsSwap {
 		for (r in reloaders)
 			if (r.afterReload != null)
 				r.afterReload();
-		log('reloaded (${[for (p in pairs) if (p.carry) p].length} classes, $moved statics kept, $fresh started over, ${walker.objects} objects, '
+		log('reload: done (${[for (p in pairs) if (p.carry) p].length} classes, $moved statics kept, $fresh started over, ${walker.objects} objects, '
 			+ '${Math.round((haxe.Timer.stamp() - start) * 1000)} ms)');
 	}
 
@@ -403,7 +403,7 @@ private class Walker {
 		var ctor:String = constructs[v._hx_index]._hx_name;
 		var made:Dynamic = Reflect.field(newEnum, ctor);
 		if (made == null) {
-			Syntax.code("console.log({0})", 'hotreload: $name.$ctor is gone from the new code; kept the old value');
+			Syntax.code("console.log({0})", 'hotreload: enum: $name.$ctor removed from the new code (old value kept)');
 			seen.set(v, v);
 			return v;
 		}

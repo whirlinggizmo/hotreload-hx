@@ -84,7 +84,7 @@ code in as it runs.
   --mount <url>=<dir>         a directory served at a path too: --mount /assets=assets
   --reload-define <name[=v]>  a define for the reload builds only, not the first
   --no-compilation-server     each build with a haxe of its own
-  --sidecar <command>         a command run beside it, started once it's serving and stopped with it (an HTTPS proxy, say):
+  --sidecar <command>         a command run beside it, started once it is serving and stopped with it (an HTTPS proxy, say):
                               a JSON array of its arguments, or them in one string, split at spaces
   --log <file>                its messages, and the builds', to a file
   --stop-with-stdin           stops when its standard input closes
@@ -191,13 +191,13 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 
 		// the first build: hot, and saying how it was made
 		var configFile = Path.join([Sys.getCwd(), ".hotreload." + Std.random(1 << 30) + ".json"]);
-		say("hotreload: building");
+		say("hotreload: build: started");
 		// with the library, whether the build names it or not
 		var code = runHaxe(build.concat(["-lib", "hotreload-hx", "-D", "hotreload", "-D", 'hotreload_config=$configFile']));
 		if (code != 0 || !FileSystem.exists(configFile)) {
 			if (FileSystem.exists(configFile))
 				FileSystem.deleteFile(configFile);
-			say(code != 0 ? "hotreload: the build failed" : "hotreload: the build isn't hot: is it a JS build, with -lib hotreload-hx?");
+			say(code != 0 ? "hotreload: build: failed" : "hotreload: build: not hot (a JS build with -lib hotreload-hx is needed)");
 			Sys.exit(1);
 		}
 		config = haxe.Json.parse(File.getContent(configFile));
@@ -222,14 +222,14 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 				case Ok(_): accept(loop, server);
 			}, 32);
 		if (failure != null) {
-			say('hotreload: can\'t serve on port $port ($failure): is something else using it? --port <n> for another');
+			say('hotreload: serve: cannot use port $port ($failure); choose another with --port <n>');
 			Sys.exit(1);
 		}
 		var compilationServer = useServer ? startCompilationServer() : null;
 		Thread.create(() -> serveRequests(loop, server));
-		say('hotreload: serving http://localhost:$port/ ($root)');
+		say('hotreload: serve: http://localhost:$port/ (${relative(root)})');
 		for (url => dir in mounts)
-			say('hotreload: and $dir at $url/');
+			say('hotreload: serve: $url/ (${relative(dir)})');
 		sayWatch();
 		Thread.create(watchAssets);
 		watch(compilationServer);
@@ -249,7 +249,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		var defined = haxe.macro.Context.definedValue("hotreload-port");
 		var port = defined == null ? null : Std.parseInt(defined);
 		if (defined != null && port == null)
-			haxe.macro.Context.fatalError('hotreload: -D hotreload-port=$defined isn\'t a port', haxe.macro.Context.currentPos());
+			haxe.macro.Context.fatalError('hotreload: -D hotreload-port=$defined is not a port', haxe.macro.Context.currentPos());
 		return port == null ? 8080 : port;
 	}
 
@@ -311,8 +311,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 						Sys.sleep(0.1);
 						continue;
 					}
-					haxe.macro.Context.fatalError('hotreload: $logFile is in use: a dev server still running in the background? '
-						+ 'To stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"', haxe.macro.Context.currentPos());
+					haxe.macro.Context.fatalError('hotreload: background: $logFile is in use (a dev server still running in the background); '
+						+ 'to stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"', haxe.macro.Context.currentPos());
 				}
 			args = args.concat(["--log", logFile]);
 		} else {
@@ -348,7 +348,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			windowsHide: background
 		})) {
 			case Error(e):
-				haxe.macro.Context.fatalError('hotreload: can\'t start the server: $e', haxe.macro.Context.currentPos());
+				haxe.macro.Context.fatalError('hotreload: serve: cannot start the server ($e)', haxe.macro.Context.currentPos());
 			case Ok(p): p;
 		}
 		if (!background)
@@ -367,7 +367,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			Sys.println(said.rtrim());
 		if (exited)
 			Sys.exit(macroExit != 0 ? macroExit : 1);
-		Sys.println('hotreload: in the background, its messages in $logFile; to stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"');
+		Sys.println('hotreload: background: log in $logFile; to stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"');
 		// the process goes on without this: only the handles are let go
 		Handle.close(pipe, () -> {});
 		Handle.close(process, () -> {});
@@ -401,20 +401,20 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			port = macroPort();
 		var answer = ask(port, "/__hotreload_stop");
 		if (answer == null) {
-			Sys.println('hotreload: nothing is serving on port $port');
+			Sys.println('hotreload: stop: nothing serving on port $port');
 			return;
 		}
 		if (answer != "stopping")
-			haxe.macro.Context.fatalError('hotreload: what serves on port $port isn\'t the dev server', haxe.macro.Context.currentPos());
+			haxe.macro.Context.fatalError('hotreload: stop: port $port is not served by a dev server', haxe.macro.Context.currentPos());
 		// gone once the port is free
 		for (_ in 0...100) {
 			if (ask(port, null) == null) {
-				Sys.println('hotreload: stopped the dev server on port $port');
+				Sys.println('hotreload: stop: done (port $port)');
 				return;
 			}
 			Sys.sleep(0.1);
 		}
-		haxe.macro.Context.fatalError('hotreload: the dev server on port $port was asked to stop, and is still serving', haxe.macro.Context.currentPos());
+		haxe.macro.Context.fatalError('hotreload: stop: failed (the dev server on port $port is still serving)', haxe.macro.Context.currentPos());
 	}
 
 	/** restart's stop: the server on the port stopped if it's this project's (started in this directory), left be if not **/
@@ -432,8 +432,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			return;
 		}
 		var stopIt = 'haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"';
-		haxe.macro.Context.fatalError(devServer ? 'hotreload: port $port is served by the dev server of $answer, not this project\'s; to stop it anyway: $stopIt'
-			: 'hotreload: port $port is in use, and not by a dev server to restart (one from an older hotreload-hx stops with: $stopIt)',
+		haxe.macro.Context.fatalError(devServer ? 'hotreload: restart: port $port is served by another project\'s dev server ($answer); to stop it anyway: $stopIt'
+			: 'hotreload: restart: port $port is in use, not by a dev server this can restart (one from an older hotreload-hx stops with: $stopIt)',
 			haxe.macro.Context.currentPos());
 	}
 
@@ -496,7 +496,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			assetVersion++;
 			assetChanges.push({version: assetVersion, urls: urls});
 			lock.release();
-			say('hotreload: ${urls.join(", ")} changed; the page loads it next');
+			say('hotreload: assets: changed (${urls.join(", ")})');
 		}
 	}
 
@@ -531,7 +531,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 
 	/** a build, of the changed files; whether the directories watched changed with it **/
 	static function rebuild(changed:Array<String>, compilationServer:String):Bool {
-		say('hotreload: building (${[for (p in changed) relative(p)].join(", ")} changed)');
+		say('hotreload: build: started (${[for (p in changed) relative(p)].join(", ")})');
 		var start = haxe.Timer.stamp();
 		lock.acquire();
 		var next = version + 1;
@@ -570,7 +570,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		}
 		lock.release();
 		var ms = Math.round((haxe.Timer.stamp() - start) * 1000);
-		say(code == 0 ? 'hotreload: built in $ms ms; the page loads it next' : "hotreload: build failed; the page keeps what it has");
+		say(code == 0 ? 'hotreload: build: done ($ms ms)' : "hotreload: build: failed (continuing with last successful build)");
 		return relisted;
 	}
 
@@ -652,7 +652,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 				Sys.sleep(0.05);
 			}
 		}
-		say("hotreload: the compilation server didn't start; building without it");
+		say("hotreload: compilation server: not started (building without one)");
 		return null;
 	}
 
@@ -767,12 +767,12 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			var onExit = (p:eval.luv.Process, status:eval.integers.Int64, signal) -> {
 				sidecarsRunning.remove(entry);
 				if (running && status.toInt() != 0)
-					say('hotreload: $name ended with ${status.toInt()}');
+					say('hotreload: sidecar: failed ($name, exit ${status.toInt()})');
 				Handle.close(p, () -> {});
 			};
 			switch (eval.luv.Process.spawn(loop, command[0], [for (a in command) (a : eval.NativeString)], {redirect: redirect, onExit: onExit})) {
 				case Error(e):
-					say('hotreload: can\'t start $name: $e');
+					say('hotreload: sidecar: cannot start $name ($e)');
 					Handle.close(input, () -> {});
 					for (o in outputs)
 						Handle.close(o, () -> {});

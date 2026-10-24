@@ -25,7 +25,7 @@ its own code and one from `C<N-1>`, so each edit shows when it runs.
 
 Each run makes one edit to `Game` first (the first reload, timed apart), three more, and,
 but in `hx-small`, three to `C<N-1>`. For each it records the time from the save to the
-new code's line ("save → running"), and from the reloader's `hotreload: building` to that
+new code's line ("save → running"), and from the reloader's `hotreload: build: started` to that
 line ("build + swap"). Save → running includes the reloader's wait for the change to
 settle: a check every 0.25 s, then one quiet one.
 
