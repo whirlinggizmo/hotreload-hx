@@ -40,6 +40,12 @@ using StringTools;
 	- `--stop-with-stdin`: stops when its standard input closes: for a program that starts
 	  it with a pipe there, so it stops when that program does, however that is (`serve`)
 	- `--log <file>`: its messages, and the builds', to the file instead of the terminal
+	- `--sidecar <command>`: a command that runs beside it, started once it's serving and
+	  stopped with it (an HTTPS proxy in front of it, say): a JSON array of its arguments,
+	  `["docker", "compose", "run", "--rm", "tls"]`, or them in one string, split at spaces. Its
+	  standard input is a pipe from this, closed when this stops (however it does): a command
+	  that stops when its input closes stops with it; one that doesn't is killed after 3 s
+	- `--help`: these
 
 	Or from a macro, in an hxml of its own beside others' (a watcher, say):
 
@@ -69,6 +75,25 @@ using StringTools;
 	the page keeps running what it has.
 **/
 class DevServer {
+	static inline var HELP = "usage: haxe -lib hotreload-hx --run hotreload.DevServer [options] <build arguments>
+
+Builds the JS build (an hxml, say) hot, serves its output directory, and rebuilds it as its sources change; the page swaps the new
+code in as it runs.
+
+  --port <n>                  where it serves (8080)
+  --mount <url>=<dir>         a directory served at a path too: --mount /assets=assets
+  --reload-define <name[=v]>  a define for the reload builds only, not the first
+  --no-compilation-server     each build with a haxe of its own
+  --sidecar <command>         a command run beside it, started once it's serving and stopped with it (an HTTPS proxy, say):
+                              a JSON array of its arguments, or them in one string, split at spaces
+  --log <file>                its messages, and the builds', to a file
+  --stop-with-stdin           stops when its standard input closes
+  --help                      this
+
+From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064, mounts: {\"/assets\": \"assets\"}})
+(options: port, mounts, reloadDefines, compilationServer, sidecars, background, log, restart); stopped with
+--macro hotreload.DevServer.stop(8064).";
+
 	/** how often the sources are checked: a check is a directory walk, cheap at this size **/
 	static inline var CHECK_INTERVAL = 0.1;
 
@@ -105,6 +130,15 @@ class DevServer {
 	/** the long polls being held, each answered once it can be, or its time is up, or there's a stop **/
 	static var waiting = new Array<{ready:() -> Bool, end:Float, answer:() -> Void}>();
 
+	/**
+		the commands run beside it (--sidecar), and those running: on the serving loop, which
+		starts them and, once it's stopping, stops them, before it lets the process end
+	**/
+	static var sidecars = new Array<Array<String>>();
+
+	static var sidecarsRunning = new Array<{process:eval.luv.Process, input:eval.luv.Pipe}>();
+	static var sidecarsStopped = new sys.thread.Lock();
+
 	static var assetVersion = 0;
 	static var assetChanges = new Array<{version:Int, urls:Array<String>}>();
 
@@ -130,6 +164,12 @@ class DevServer {
 					reloadDefines.push(args[++i]);
 				case "--log":
 					log = File.write(args[++i]);
+				case "--sidecar":
+					var command = args[++i];
+					sidecars.push(command.startsWith("[") ? haxe.Json.parse(command) : [for (w in command.split(" ")) if (w != "") w]);
+				case "--help" | "-h":
+					Sys.println(HELP);
+					Sys.exit(0);
 				case "--stop-with-stdin":
 					// the pipe's other end closes when its program ends, killed or not, on every system
 					Thread.create(() -> {
@@ -145,7 +185,7 @@ class DevServer {
 			i++;
 		}
 		if (build.length == 0) {
-			say("usage: haxe -lib hotreload-hx --run hotreload.DevServer [--port n] [--mount /url=dir] <build arguments>");
+			say(HELP);
 			Sys.exit(1);
 		}
 
@@ -194,6 +234,8 @@ class DevServer {
 		say('hotreload: watching ${dirs.join(", ")}');
 		Thread.create(watchAssets);
 		watch(compilationServer);
+		// (the serving loop stops them as it stops, a few seconds at most)
+		sidecarsStopped.wait(5);
 		// the compilation server's shell sees this process go, and stops it
 		say("hotreload: stopped");
 		Sys.exit(0);
@@ -219,7 +261,9 @@ class DevServer {
 		compiler: its standard input is a pipe from it (`--stop-with-stdin`). Its port is
 		`port`, or else `-D hotreload-port=<n>`'s, or 8080. With `restart: true`, a dev
 		server this project left on the port (one started in this directory) is stopped
-		first; another project's isn't, and this fails saying whose it is.
+		first; another project's isn't, and this fails saying whose it is. `sidecars` are
+		commands run beside it, each an array of its arguments (`--sidecar`): started once
+		it's serving, and stopped with it, however it stops.
 
 		With `background: true`, it returns once the server is serving (or fails as it
 		does), and the server keeps running after the compiler, detached from this terminal,
@@ -233,7 +277,8 @@ class DevServer {
 		?compilationServer:Bool,
 		?background:Bool,
 		?log:String,
-		?restart:Bool
+		?restart:Bool,
+		?sidecars:Array<Array<String>>
 	}) {
 		var port = options != null && options.port != null ? options.port : macroPort();
 		if (options != null && options.restart == true)
@@ -249,6 +294,9 @@ class DevServer {
 					args = args.concat(["--reload-define", d]);
 			if (options.compilationServer == false)
 				args.push("--no-compilation-server");
+			if (options.sidecars != null)
+				for (command in options.sidecars)
+					args = args.concat(["--sidecar", haxe.Json.stringify(command)]);
 		}
 		var logFile = null;
 		if (background) {
@@ -273,18 +321,7 @@ class DevServer {
 		}
 		args = args.concat(Std.isOfType(build, String) ? [(build : String)] : (build : Array<String>));
 
-		var loop = if (background) Loop.init().resolve() else {
-			if (macroLoop == null) {
-				macroLoop = Loop.init().resolve();
-				// and fails as the server does, as the hxml with --run did
-				haxe.macro.Context.onAfterGenerate(() -> {
-					macroLoop.run(DEFAULT);
-					if (macroExit != 0)
-						Sys.exit(macroExit);
-				});
-			}
-			macroLoop;
-		}
+		var loop = background ? Loop.init().resolve() : foregroundLoop();
 		var pipe = eval.luv.Pipe.init(loop).resolve();
 		var stdin = eval.luv.Process.toParentPipe(eval.luv.Process.stdin, pipe, true, false, false);
 		// in the background, detached: a session of its own (Unix), no console and out of libuv's job, which would end it
@@ -336,6 +373,23 @@ class DevServer {
 		Handle.close(pipe, () -> {});
 		Handle.close(process, () -> {});
 		loop.run(NOWAIT);
+	}
+
+	/**
+		the loop the processes the macros start run on in this terminal: once the hxml's
+		macros are done, the compiler runs it until they've all ended, and fails as the
+		server did, as the hxml with --run did
+	**/
+	static function foregroundLoop():Loop {
+		if (macroLoop == null) {
+			macroLoop = Loop.init().resolve();
+			haxe.macro.Context.onAfterGenerate(() -> {
+				macroLoop.run(DEFAULT);
+				if (macroExit != 0)
+					Sys.exit(macroExit);
+			});
+		}
+		return macroLoop;
 	}
 
 	/**
@@ -651,6 +705,8 @@ class DevServer {
 
 	/** runs the loop: its connections, and a check of the held long polls a hundred times a second **/
 	static function serveRequests(loop:Loop, server:Tcp) {
+		startSidecars(loop);
+		var stopping = -1.0;
 		var check = Timer.init(loop).resolve();
 		check.start(() -> {
 			var now = haxe.Timer.stamp();
@@ -660,12 +716,71 @@ class DevServer {
 					w.answer();
 				}
 			if (!running) {
+				// the sidecars told to stop (their input closed), and any still running after 3 s killed
+				if (stopping < 0) {
+					stopping = now;
+					for (s in sidecarsRunning)
+						Handle.close(s.input, () -> {});
+				}
+				if (sidecarsRunning.length > 0 && now < stopping + 3)
+					return;
+				// (by its pid: Haxe 4.3's Process.kill isn't there)
+				for (s in sidecarsRunning)
+					eval.luv.Process.killPid(s.process.pid(), SIGKILL);
+				sidecarsStopped.release();
 				check.stop();
 				Handle.close(check, () -> {});
 				Handle.close(server, () -> {});
 			}
 		}, 10, 10);
 		loop.run(DEFAULT);
+	}
+
+	/** each sidecar started: its output to the terminal, or the log; its failing said **/
+	static function startSidecars(loop:Loop) {
+		for (command in sidecars) {
+			var name = command.join(" ");
+			var input = eval.luv.Pipe.init(loop).resolve();
+			var redirect = [eval.luv.Process.toParentPipe(eval.luv.Process.stdin, input, true, false, false)];
+			var outputs = [];
+			if (log == null) {
+				redirect.push(eval.luv.Process.inheritFd(eval.luv.Process.stdout, 1));
+				redirect.push(eval.luv.Process.inheritFd(eval.luv.Process.stderr, 2));
+			} else {
+				for (fd in [eval.luv.Process.stdout, eval.luv.Process.stderr]) {
+					var output = eval.luv.Pipe.init(loop).resolve();
+					outputs.push(output);
+					redirect.push(eval.luv.Process.toParentPipe(fd, output, false, true, false));
+				}
+			}
+			var entry = null;
+			var onExit = (p:eval.luv.Process, status:eval.integers.Int64, signal) -> {
+				sidecarsRunning.remove(entry);
+				if (running && status.toInt() != 0)
+					say('hotreload: $name ended with ${status.toInt()}');
+				Handle.close(p, () -> {});
+			};
+			switch (eval.luv.Process.spawn(loop, command[0], [for (a in command) (a : eval.NativeString)], {redirect: redirect, onExit: onExit})) {
+				case Error(e):
+					say('hotreload: can\'t start $name: $e');
+					Handle.close(input, () -> {});
+					for (o in outputs)
+						Handle.close(o, () -> {});
+				case Ok(process):
+					entry = {process: process, input: input};
+					sidecarsRunning.push(entry);
+					for (output in outputs)
+						Stream.readStart(output, result -> switch (result) {
+							case Ok(data):
+								logLock.acquire();
+								log.writeString(data.toString());
+								log.flush();
+								logLock.release();
+							case Error(_):
+								Handle.close(output, () -> {});
+						});
+			}
+		}
 	}
 
 	static function accept(loop:Loop, server:Tcp) {

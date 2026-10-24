@@ -425,6 +425,22 @@ in its directory); another project's it leaves running, and fails saying whose i
 --macro hotreload.DevServer.serve("build.web.hxml", {background: true, restart: true})
 ```
 
+`sidecars` are commands that run beside the server, each an array of its arguments: started
+once it's serving, and stopped with it however it stops (Ctrl+C, its terminal closed,
+`stop`, a `restart`). An HTTPS proxy in front of it, say, for a phone on the network:
+
+```hxml
+--macro hotreload.DevServer.serve("build.web.hxml", {sidecars: [["docker", "compose", "run", "--rm", "tls"]]})
+```
+
+A sidecar's standard input is a pipe from the server, closed when the server stops; one that
+doesn't stop when its input closes is killed 3 seconds later. Killing `docker` doesn't stop
+its container, so a container's command should end when its input does (in Compose,
+`stdin_open: true` and, for nginx,
+`command: ["sh", "-c", "nginx -g 'daemon off;' & cat > /dev/null; nginx -s stop"]`). Its
+output goes where the server's does. `haxe -lib hotreload-hx --run hotreload.DevServer --help` lists the server's
+options.
+
 ```hxml
 # build.web.hxml
 -cp src
