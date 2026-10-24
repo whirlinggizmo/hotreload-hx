@@ -406,7 +406,8 @@ stops with the compiler however that ends:
 ```
 
 `mounts` serves directories besides the build's output, such as assets; the sources it
-watches are the build's own class paths (`-cp`). With `background: true`, `serve` returns
+watches are the build's own class paths (`-cp`), not its libraries', even in a local
+repository (`haxelib newrepo`'s `.haxelib/`) inside the project. With `background: true`, `serve` returns
 once the server is serving and leaves it running, detached from the terminal, its messages
 in `.hotreload-<port>.log` (or `log`), until it's stopped:
 

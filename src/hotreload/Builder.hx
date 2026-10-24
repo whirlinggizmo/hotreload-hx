@@ -256,8 +256,9 @@ class Builder {
 
 	/**
 		The project: its own class paths (inside its directory; not the standard library's
-		or a haxelib's), or else the main class's directory, and the main class's file. Its
-		classes' plain statics start over on a reload; its sources are watched
+		or a haxelib's, a local repository's, `.haxelib/`, inside it too), or else the main
+		class's directory, and the main class's file. Its classes' plain statics start over on
+		a reload; its sources are watched
 	**/
 	static function findProject(args:Array<String>, cwd:String) {
 		mainFile = try Path.normalize(FileSystem.absolutePath(Context.resolvePath(mainClass.replace(".", "/") + ".hx"))) catch (_) null;
@@ -266,7 +267,8 @@ class Builder {
 		while (j < args.length) {
 			if ((args[j] == "-cp" || args[j] == "-p" || args[j] == "--class-path") && j + 1 < args.length) {
 				var dir = Path.removeTrailingSlashes(Path.normalize(absolute(cwd, args[j + 1])));
-				if (dir.startsWith(Path.removeTrailingSlashes(cwd)) && FileSystem.exists(dir) && !dirs.contains(dir))
+				var library = (dir + "/").contains("/.haxelib/");
+				if (dir.startsWith(Path.removeTrailingSlashes(cwd)) && !library && FileSystem.exists(dir) && !dirs.contains(dir))
 					dirs.push(dir);
 			}
 			j++;

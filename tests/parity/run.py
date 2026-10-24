@@ -22,6 +22,8 @@ statics:
 - hotreload-hx's own classes are never the project's, even with its src/ among the
   project's class paths: not warned about;
 - the DevServer shows a build's warnings as the build finishes, not when it stops;
+- a library in the project's own repository (.haxelib/, haxelib newrepo), inside its
+  directory, isn't the project's: its code isn't warned about, nor its directory watched;
 - the DevServer builds from its hxml as it is now: a class path added to an hxml the
   build names (or one it names) while it runs is built with, and watched;
 - built through a compilation server, from its cache, into an output directory that isn't
@@ -32,7 +34,7 @@ statics:
 
 It exits with 1 when something differs from what's expected.
 """
-import os, shutil, socket, subprocess, sys
+import json, os, shutil, socket, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "matrix"))
@@ -164,6 +166,40 @@ def own(target):
     return lines
 
 
+def local_repo(target):
+    """localrepo/ built as a project with its own repository (.haxelib/, as haxelib newrepo
+    makes it), hotreload-hx in it as haxelib dev puts it, and localrepo/lib/ installed in it
+    as locallib: what's wrong, if anything (the library's directory among the project's,
+    its method passed as a value warned about, or the build failing)"""
+    print(f"\n== a library in the project's own repository, {target}")
+    work = os.path.join(HERE, "out", "localrepo")
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(HERE, "localrepo", "src"), os.path.join(work, "src"))
+    repo = os.path.join(work, ".haxelib")
+    os.makedirs(os.path.join(repo, "hotreload-hx"))
+    with open(os.path.join(repo, "hotreload-hx", ".dev"), "w") as f:
+        f.write(os.path.normpath(os.path.join(HERE, "..", "..")))
+    shutil.copytree(os.path.join(HERE, "localrepo", "lib"), os.path.join(repo, "locallib", "1,0,0"))
+    with open(os.path.join(repo, "locallib", ".current"), "w") as f:
+        f.write("1.0.0")
+    config = os.path.join(work, "config.json")
+    output = {"cpp": ["--cpp", "out/cpp", "--no-output"], "js": ["--js", "out/main.js"]}[target]
+    r = subprocess.run(["haxe", "-cp", "src", "-lib", "locallib", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload",
+                        "-D", f"hotreload_config={config}"] + output, cwd=work, capture_output=True, text=True)
+    wrong = []
+    if r.returncode != 0:
+        wrong = [l.strip() for l in r.stderr.splitlines() if "Warning" not in l]
+    else:
+        wrong = [l.strip() for l in r.stderr.splitlines() if "passed as a value" in l]
+        if target == "js":
+            dirs = json.load(open(config))["dirs"]
+            print("    | the project's directories: " + ", ".join(os.path.relpath(d, work) for d in dirs))
+            wrong += [f"{d} is among the project's directories" for d in dirs if ".haxelib" in d]
+    for l in wrong:
+        print("    | " + l)
+    return wrong
+
+
 def dev_output():
     """the DevServer building warn/: whether the build's warnings came before it said it
     was serving (they're the build's), not after it stopped"""
@@ -281,6 +317,9 @@ def check(name, result):
     if result["own"]:
         print(f"  FAILED {name}, hotreload-hx's src/ as a project class path: {result['own']!r}")
         failures += 1
+    if result.get("local_repo"):
+        print(f"  FAILED {name}, a library in the project's own repository: {result['local_repo']!r}")
+        failures += 1
     if result.get("dev_relist") is False:
         print(f"  FAILED {name}: the DevServer didn't build with a class path added to its hxml as it ran")
         failures += 1
@@ -303,6 +342,7 @@ if __name__ == "__main__":
         results[t]["warnings"] = warnings(t)
         results[t]["order"] = order(t)
         results[t]["own"] = own(t)
+        results[t]["local_repo"] = local_repo(t)
         if t == "js":
             results[t]["dev_output"] = dev_output()
             results[t]["dev_relist"] = dev_relist()
