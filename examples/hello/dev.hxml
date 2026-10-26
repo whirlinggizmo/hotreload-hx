@@ -1,7 +1,7 @@
-# hot reload in a page: hotreload's dev server builds web-build.hxml hot (with source maps),
+# hot reload in a page: hotreload's dev server builds build.hxml hot (with source maps),
 # serves web/ and assets/ at http://localhost:8080/, and rebuilds as src/ is saved
 -lib hotreload-hx
 --run hotreload.DevServer
 --mount /assets=assets
-web-build.hxml
+build.hxml
 -debug

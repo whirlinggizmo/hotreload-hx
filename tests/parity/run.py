@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""The parity test: the same program and the same edits on hxcpp and on JS (node, through
-hotreload.DevServer), with the same results expected of both. It checks the rules for
-statics:
+"""The behavior test: a program served with hotreload.DevServer and run in node, edited as
+it runs, and its builds. It checks the rules for statics:
 
 - a @:hot static is kept, wherever it is; a plain static of the project's starts over from
-  its (new) first value, or its type's default, whether or not its class is in the native
-  build's cppia module; a new one starts from its first value;
+  its (new) first value, or its type's default; a new one starts from its first value;
 - a @:hot static whose type changed is kept when it's still the same kind of value
-  (Int to Float), and starts over when not (Int to String), with the same message;
+  (Int to Float), and starts over when not (Int to String), with a message;
 - a @:hot (default, null) static with no first value, set by the main class, is kept;
 - a computed static property, (get, never), builds and reads its getter (it has no value to keep);
 - the main class's statics are kept;
 - a completion made in the reloaded code before a reload (a lambda calling a @:hot function
   by name), held by the main class, reaches the new code after it;
-- a method of your code passed as a value is warned about, by both builds alike;
-- the static functions the main class calls are @:hot without being marked, and a call the
-  build can't see (through an alias) is warned about, by both builds alike;
+- a method of your code passed as a value is warned about;
 - a class whose statics have no type written builds before the classes it uses, as
   without hotreload: another class's build macro that needs its own to have run first
   isn't run early;
@@ -31,8 +27,7 @@ statics:
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
-    python3 tests/parity/run.py            both targets, then the comparison
-    python3 tests/parity/run.py cpp        one target (cpp or js), with its own checks
+    python3 tests/parity/run.py
 
 It exits with 1 when something differs from what's expected.
 """
@@ -46,11 +41,11 @@ LOGS = os.path.join(HERE, "logs")
 OUTSIDE = os.path.join(HERE, "src", "Outside.hx")
 
 # outside=<count>,<tag>,<n>,<list.length>: the main class sets them to 5,t,5,1; a reload
-# starts them over, though Outside isn't in the native build's module
+# starts them over (Outside is the project's)
 EXPECTED = {
     "v1": "report v1 kept=5 doubled=10 plain=5 widened=3 label=7 service=on outside=5,t,5,1 main=5 loaded=v1:7",
     "v2": "report v2 kept=5 doubled=10 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v2:8",
-    # the completion v2 made (by a module, natively) reaches v3's onLoaded
+    # the completion v2 made reaches v3's onLoaded
     "v3": "report v3 kept=5 doubled=10 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v3:8",
     "types": [
         "hotreload: static: game.State.label started over (type changed: Int to String)",
@@ -68,8 +63,8 @@ def fresh_sources():
 
 
 def scenario(p, logs):
-    """the edits, the same for both targets: what the program said of each. `logs`:
-    everything written (the program's, and the DevServer's on JS)"""
+    """the edits: what the program said of each. `logs`: everything written (the
+    program's, and the DevServer's)"""
     result = {}
     result["v1"] = p.wait(r"^report v1")
     install(os.path.join(HERE, "v2"), os.path.join(HERE, "src"))
@@ -80,26 +75,8 @@ def scenario(p, logs):
     return result
 
 
-def cpp():
-    print("\n== cpp")
-    fresh_sources()
-    if subprocess.run(["haxe", "build.hxml"], cwd=HERE, stdout=subprocess.DEVNULL).returncode != 0:
-        sys.exit("the build failed")
-    log = os.path.join(LOGS, "cpp.log")
-    p = Program(HERE, ["./out/hot/Main-debug"], log)
-    try:
-        result = scenario(p, [log])
-        # native only: an edit outside the reloaded code (Outside isn't in the module) is told, and needs a restart
-        edit(OUTSIDE, "public static var count = 0;", "public static var count = 0; // edited")
-        result["restart"] = p.wait(r"outside the reloaded code; restart", timeout=60, show=False) is not None
-        return result
-    finally:
-        p.stop()
-        fresh_sources()
-
-
-def js():
-    print("\n== js")
+def program():
+    print("\n== the program, edited as it runs")
     fresh_sources()
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -121,12 +98,12 @@ def js():
         fresh_sources()
 
 
-def warnings(target):
+def warnings():
     """the warn/ program's build: what the compiler warned about, one line per use of a
-    method as a value (the same on both targets)"""
-    print(f"\n== warnings, {target}")
+    method as a value"""
+    print("\n== warnings")
     os.makedirs(os.path.join(HERE, "out", "warn"), exist_ok=True)
-    output = {"cpp": ["--cpp", "out/warn/cpp"], "js": ["--js", "out/warn/main.js"]}[target]
+    output = ["--js", "out/warn/main.js"]
     r = subprocess.run(["haxe", "-cp", "warn", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload", "--no-output"] + output,
                        cwd=HERE, capture_output=True, text=True)
     if r.returncode != 0:
@@ -137,11 +114,11 @@ def warnings(target):
     return lines
 
 
-def order(target):
+def order():
     """the order/ program's build: the errors it failed with, or none"""
-    print(f"\n== build order, {target}")
+    print("\n== build order")
     os.makedirs(os.path.join(HERE, "out", "order"), exist_ok=True)
-    output = {"cpp": ["--cpp", "out/order/cpp"], "js": ["--js", "out/order/main.js"]}[target]
+    output = ["--js", "out/order/main.js"]
     r = subprocess.run(["haxe", "-cp", "order", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload", "--no-output"] + output,
                        cwd=HERE, capture_output=True, text=True)
     errors = [l.strip() for l in r.stderr.splitlines() if "Warning" not in l] if r.returncode != 0 else []
@@ -150,13 +127,13 @@ def order(target):
     return errors
 
 
-def own(target):
+def own():
     """the order/ program built from the repository's root with -cp src, which makes
     hotreload-hx's src/ one of the project's class paths: the hotreload warnings about its
     own files (there should be none), or the errors it failed with"""
-    print(f"\n== hotreload-hx's src/ as a project class path, {target}")
+    print("\n== hotreload-hx's src/ as a project class path")
     root = os.path.normpath(os.path.join(HERE, "..", ".."))
-    output = {"cpp": ["--cpp", "tests/parity/out/own/cpp"], "js": ["--js", "tests/parity/out/own/main.js"]}[target]
+    output = ["--js", "tests/parity/out/own/main.js"]
     r = subprocess.run(["haxe", "-cp", "src", "-cp", "tests/parity/order", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload",
                         "--no-output"] + output, cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
@@ -168,12 +145,12 @@ def own(target):
     return lines
 
 
-def local_repo(target):
+def local_repo():
     """localrepo/ built as a project with its own repository (.haxelib/, as haxelib newrepo
     makes it), hotreload-hx in it as haxelib dev puts it, and localrepo/lib/ installed in it
     as locallib: what's wrong, if anything (the library's directory among the project's,
     its method passed as a value warned about, or the build failing)"""
-    print(f"\n== a library in the project's own repository, {target}")
+    print("\n== a library in the project's own repository")
     work = os.path.join(HERE, "out", "localrepo")
     shutil.rmtree(work, ignore_errors=True)
     shutil.copytree(os.path.join(HERE, "localrepo", "src"), os.path.join(work, "src"))
@@ -185,7 +162,7 @@ def local_repo(target):
     with open(os.path.join(repo, "locallib", ".current"), "w") as f:
         f.write("1.0.0")
     config = os.path.join(work, "config.json")
-    output = {"cpp": ["--cpp", "out/cpp", "--no-output"], "js": ["--js", "out/main.js"]}[target]
+    output = ["--js", "out/main.js"]
     r = subprocess.run(["haxe", "-cp", "src", "-lib", "locallib", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload",
                         "-D", f"hotreload_config={config}"] + output, cwd=work, capture_output=True, text=True)
     wrong = []
@@ -193,10 +170,9 @@ def local_repo(target):
         wrong = [l.strip() for l in r.stderr.splitlines() if "Warning" not in l]
     else:
         wrong = [l.strip() for l in r.stderr.splitlines() if "passed as a value" in l]
-        if target == "js":
-            dirs = json.load(open(config))["dirs"]
-            print("    | the project's directories: " + ", ".join(os.path.relpath(d, work) for d in dirs))
-            wrong += [f"{d} is among the project's directories" for d in dirs if ".haxelib" in d]
+        dirs = json.load(open(config))["dirs"]
+        print("    | the project's directories: " + ", ".join(os.path.relpath(d, work) for d in dirs))
+        wrong += [f"{d} is among the project's directories" for d in dirs if ".haxelib" in d]
     for l in wrong:
         print("    | " + l)
     return wrong
@@ -292,12 +268,12 @@ def dev_bind():
         server.stop()
 
 
-def server(target):
+def server():
     """the program built through a compilation server, as the DevServer and an editor do:
     four builds, the later ones from the server's cache, into an output directory that
     isn't there yet. Each build's hotreload warnings: a build whose main class came from
     the cache says nothing about its calls"""
-    print(f"\n== compilation server, {target}")
+    print("\n== compilation server")
     fresh_sources()
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -308,10 +284,10 @@ def server(target):
     try:
         import time
         time.sleep(1)
-        output = {"cpp": ["--cpp", "out/server/cpp", "--no-output"], "js": ["--js", "out/server/main.js"]}[target]
+        output = ["--js", "out/server/main.js"]
         results = []
         for reload in [False, False, True, True]:
-            extra = ["-D", "hotreload_reload"] if reload and target == "js" else []
+            extra = ["-D", "hotreload_reload"] if reload else []
             r = subprocess.run(["haxe", "--connect", str(port), "-cp", "src", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload"]
                                + extra + output, cwd=HERE, capture_output=True, text=True)
             lines = sorted(l.strip() for l in r.stderr.splitlines() if "hotreload:" in l)
@@ -326,7 +302,6 @@ def server(target):
 
 
 WARNINGS = sorted([
-    "warn/Main.hx:11: characters 3-12 : Warning : hotreload: the main class calls Warn.later in a way the build cannot see (through an alias, say), so it is not @:hot: mark it yourself, or a native reload will not reach it",
     "warn/Main.hx:12: characters 14-24 : Warning : hotreload: later passed as a value keeps its old code after a reload; call it from a lambda, x -> later(x)",
     "warn/Warn.hx:14: characters 8-15 : Warning : hotreload: place passed as a value keeps its old code after a reload; call it from a lambda, x -> place(x)",
     "warn/Warn.hx:15: characters 8-16 : Warning : hotreload: placeAll passed as a value keeps its old code after a reload; call it from a lambda, x -> placeAll(x)",
@@ -338,15 +313,12 @@ DEV_BIND = ["click v1", "click v2", "removed=true listeners=0", "click v3", "rem
 
 
 def check(name, result):
-    """what one target did, against what's expected"""
+    """what the test found, against what's expected"""
     failures = 0
     for key in EXPECTED:
         if result[key] != EXPECTED[key]:
             print(f"  FAILED {name}, {key}: {result[key]!r}, expected {EXPECTED[key]!r}")
             failures += 1
-    if "restart" in result and not result["restart"]:
-        print(f"  FAILED {name}: the edit outside the reloaded code wasn't told")
-        failures += 1
     for i, b in enumerate(result.get("server", [])):
         if b["code"] != 0 or b["warnings"] != []:
             print(f"  FAILED {name}, compilation server build {i + 1}: exit {b['code']}, warnings {b['warnings']!r}")
@@ -379,24 +351,16 @@ def check(name, result):
 
 if __name__ == "__main__":
     os.makedirs(LOGS, exist_ok=True)
-    targets = sys.argv[1:] or ["cpp", "js"]
-    results = {t: {"cpp": cpp, "js": js}[t]() for t in targets}
-    for t in targets:
-        results[t]["warnings"] = warnings(t)
-        results[t]["order"] = order(t)
-        results[t]["own"] = own(t)
-        results[t]["local_repo"] = local_repo(t)
-        if t == "js":
-            results[t]["dev_output"] = dev_output()
-            results[t]["dev_relist"] = dev_relist()
-            results[t]["dev_bind"] = dev_bind()
-        results[t]["server"] = server(t)
+    result = program()
+    result["warnings"] = warnings()
+    result["order"] = order()
+    result["own"] = own()
+    result["local_repo"] = local_repo()
+    result["dev_output"] = dev_output()
+    result["dev_relist"] = dev_relist()
+    result["dev_bind"] = dev_bind()
+    result["server"] = server()
     print("\n== results")
-    failures = sum(check(t, r) for t, r in results.items())
-    if len(targets) == 2:
-        shared = {t: {k: v for k, v in r.items() if k in EXPECTED} for t, r in results.items()}
-        if shared["cpp"] != shared["js"]:
-            print("  FAILED: the targets differ")
-            failures += 1
+    failures = check("js", result)
     print("\nall passed" if failures == 0 else f"\n{failures} failed")
     sys.exit(1 if failures else 0)

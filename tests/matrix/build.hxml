@@ -1,6 +1,5 @@
+# the matrix: run.py serves it with hotreload.DevServer and runs it in node
 -cp src
 -lib hotreload-hx
 --main Main
--D hotreload
--debug
---cpp out/hot
+--js out/js/main.js

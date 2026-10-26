@@ -2,3 +2,4 @@ out/
 web/hello.js
 web/hello.js.map
 web/.hotreload-changed
+web/*.hotreload.json

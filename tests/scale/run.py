@@ -4,18 +4,15 @@ classes (or Nim modules), builds it hot, runs it, and times a one-line edit to t
 code and one to the deepest class, which everything depends on. The output is read by
 hand; nothing here passes or fails on its own.
 
-    python3 tests/scale/run.py                       every kind, at 100, 1000 and 3000
-    python3 tests/scale/run.py hx-all hx-small --sizes 100,1000
+    python3 tests/scale/run.py                       both kinds, at 100, 1000 and 3000
+    python3 tests/scale/run.py js --sizes 100,1000
     python3 tests/scale/run.py nim --nim ../hotreload-nim
-    python3 tests/scale/run.py hx-all --sizes 100 --keep    keeps gen/ to look into
+    python3 tests/scale/run.py js --sizes 100 --keep    keeps gen/ to look into
 
 Each program is generated in gen/ and deleted once it's measured (they and their builds
 run to gigabytes), and gen/ goes at the end of a run, but with --keep.
 
 The kinds:
-    hx-all    hxcpp, every class in the reloaded code (src/game/)
-    hx-small  hxcpp, the classes in src/lib/, compiled into the executable; only Game in
-              the reloaded code
     js        JS in node, through hotreload.DevServer (the whole bundle is rebuilt)
     nim       hotreload-nim, the modules imported by game.nim, which are all reloaded
 """
@@ -131,18 +128,6 @@ class Game {{
 """
 
 
-HX_MAIN = """class Main {
-	static function main() {
-		var reloader = new hotreload.Reloader();
-		while (true) {
-			reloader.update();
-			game.Game.tick();
-			Sys.sleep(0.02);
-		}
-	}
-}
-"""
-
 JS_MAIN = """class Main {
 	static function main() {
 		new hotreload.Reloader();
@@ -163,22 +148,14 @@ def gen_hx(kind, n):
     root = os.path.join(GEN, f"{kind}-{n}")
     if os.path.isdir(root):
         shutil.rmtree(root)
-    pkg = "lib" if kind == "hx-small" else "game"
+    pkg = "game"
     os.makedirs(os.path.join(root, "src", pkg), exist_ok=True)
-    os.makedirs(os.path.join(root, "src", "game"), exist_ok=True)
     for i in range(n):
         save(os.path.join(root, "src", pkg, f"C{i}.hx"), hx_class(pkg, i, n))
     save(os.path.join(root, "src", "game", "Game.hx"), hx_game(pkg, n))
-    if kind == "js":
-        os.makedirs(os.path.join(root, "js"))
-        save(os.path.join(root, "js", "Main.hx"), JS_MAIN)
-        save(os.path.join(root, "js", "Sys.hx"), JS_SYS)
-        save(os.path.join(root, "build.hxml"),
-             "-cp src\n-cp js\n-lib hotreload-hx\n--main Main\n--js out/js/main.js\n-D js-es=6\n")
-    else:
-        save(os.path.join(root, "src", "Main.hx"), HX_MAIN)
-        save(os.path.join(root, "build.hxml"),
-             "-cp src\n-lib hotreload-hx\n--main Main\n-D hotreload\n-debug\n--cpp out/hot\n")
+    save(os.path.join(root, "src", "Main.hx"), JS_MAIN)
+    save(os.path.join(root, "src", "Sys.hx"), JS_SYS)
+    save(os.path.join(root, "build.hxml"), "-cp src\n-lib hotreload-hx\n--main Main\n--js out/js/main.js\n")
     return root, os.path.join(root, "src", "game", "Game.hx"), os.path.join(root, "src", pkg, f"C{n - 1}.hx")
 
 
@@ -380,10 +357,8 @@ def run(kind, n, args, tag, root, game, deep):
         exe = os.path.join(root, "out", "main")
         full = timed(["nim", "c", "-d:hotReload", "-d:useMalloc", "--debugger:native", "--hints:off",
                       f"--out:{exe}", os.path.join(root, "src", "main.nim")], root, blog)
-    elif kind == "js":
-        full = timed(["haxe", "build.hxml"], root, blog)  # the dev server builds it again; this times one build
     else:
-        full = timed(["haxe", "build.hxml"], root, blog)
+        full = timed(["haxe", "build.hxml"], root, blog)  # the dev server builds it again; this times one build
     print(f"   full build {full:.1f} s; running")
 
     if kind == "js":
@@ -396,8 +371,7 @@ def run(kind, n, args, tag, root, game, deep):
         prog = Log(root, ["node", "out/js/main.js"], os.path.join(LOGS, f"{tag}.log"), env=env)
         builder = server
     else:
-        exe = os.path.join(root, "out", "main") if kind == "nim" else os.path.join(root, "out", "hot", "Main-debug")
-        prog = Log(root, [exe], os.path.join(LOGS, f"{tag}.log"))
+        prog = Log(root, [os.path.join(root, "out", "main")], os.path.join(LOGS, f"{tag}.log"))
         builder = prog
 
     result = {"kind": kind, "n": n, "full": full, "first": None, "game": [], "deep": []}
@@ -406,7 +380,7 @@ def run(kind, n, args, tag, root, game, deep):
             return result
         time.sleep(1.5)
         v, d = 0, 0
-        plan = [("first", game)] + [("game", game)] * EDITS + ([("deep", deep)] * EDITS if kind != "hx-small" else [])
+        plan = [("first", game)] + [("game", game)] * EDITS + [("deep", deep)] * EDITS
         for what, path in plan:
             if path == game:
                 old, v = f'"version v{v} ', v + 1
@@ -451,7 +425,7 @@ def table(results):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("kinds", nargs="*", default=["hx-all", "hx-small", "js", "nim"])
+    ap.add_argument("kinds", nargs="*", default=["js", "nim"])
     ap.add_argument("--sizes", default="100,1000,3000")
     ap.add_argument("--nim", default=os.path.join(HERE, "..", "..", "..", "hotreload-nim"),
                     help="a checkout of hotreload-nim")

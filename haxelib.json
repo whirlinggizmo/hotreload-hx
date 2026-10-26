@@ -2,11 +2,11 @@
 	"name": "hotreload-hx",
 	"url": "https://github.com/whirlinggizmo/hotreload-hx",
 	"license": "MIT",
-	"tags": ["cpp", "cppia", "hotreload", "gamedev"],
-	"description": "Hot reload for Haxe applications: a running program's code is rebuilt when you save a change, and swapped in without losing its state.",
-	"version": "0.1.0",
+	"tags": ["js", "hotreload", "gamedev"],
+	"description": "Hot reload for Haxe JavaScript applications, in the browser or node: a running program's code is rebuilt when you save a change, and swapped in without losing its state.",
+	"version": "0.2.0",
 	"classPath": "src/",
-	"releasenote": "First release: hxcpp, through cppia.",
+	"releasenote": "JS only: the browser and node, through its dev server. Native reload (hxcpp, through cppia) is on the hxcpp branch.",
 	"contributors": [],
 	"dependencies": {}
 }

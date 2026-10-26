@@ -12,18 +12,16 @@ class Hello {
 	@:hot static var name = "world";
 
 	@:hot static var ticks = 0; // kept: it counts on through each reload
-	static var sinceReload = 0; // a plain static: on native, starts over with each reload
+	static var sinceReload = 0; // a plain static: starts over with each reload
 
 	@:hot static var greeting = "Hello"; // read from assets/greeting.txt
 
 	public static function onStart() {
 		readGreeting();
 		#if !hotreload
-		say("hello: running (no hot reload in this build: `haxe hot.hxml` or `haxe web.hxml` for that)");
-		#elseif js
-		say("hello: running. Edit src/Hello.hx, or assets/greeting.txt, and save.");
+		say("hello: running (no hot reload in this build: `haxe dev.hxml` for that)");
 		#else
-		say("hello: running. Edit src/Hello.hx, or assets/greeting.txt, and save; Ctrl-C to stop.");
+		say("hello: running. Edit src/Hello.hx, or assets/greeting.txt, and save.");
 		#end
 	}
 
@@ -42,13 +40,13 @@ class Hello {
 			say('$greeting, $name! (ticks: $ticks, since the last reload: $sinceReload)');
 	}
 
-	/** saved assets, from the reloader (hot builds only): paths on native, URLs on JS **/
-	public static function onAssetsChanged(paths:Array<String>) {
-		if (paths.exists(p -> p.endsWith("assets/greeting.txt")))
+	/** saved assets, from the reloader (hot builds only), by URL **/
+	public static function onAssetsChanged(urls:Array<String>) {
+		if (urls.exists(u -> u.endsWith("assets/greeting.txt")))
 			readGreeting(() -> say('hello: the greeting is now "$greeting"'));
 	}
 
-	/** sets `greeting` from assets/greeting.txt: at once on native, once it's fetched on JS **/
+	/** sets `greeting` from assets/greeting.txt, once it's fetched **/
 	static function readGreeting(?then:() -> Void) {
 		function set(text:String) {
 			text = text.trim();
@@ -56,23 +54,15 @@ class Hello {
 			if (then != null)
 				then();
 		}
-		#if js
 		js.Browser.window.fetch("assets/greeting.txt", {cache: NO_STORE})
 			.then(r -> r.ok ? r.text() : js.lib.Promise.resolve(""))
 			.then(set, _ -> set(""));
-		#else
-		set(try sys.io.File.getContent("assets/greeting.txt") catch (_) "");
-		#end
 	}
 
 	static function say(line:String) {
-		#if js
 		js.Browser.console.log(line);
 		var log = js.Browser.document.getElementById("log");
 		if (log != null)
 			log.textContent += line + "\n";
-		#else
-		Sys.println(line);
-		#end
 	}
 }

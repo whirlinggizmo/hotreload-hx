@@ -1,9 +1,9 @@
 import Warn as W;
 
 /**
-	the warning test's main class: builds, never runs. The build marks what it calls into
-	the reloaded code @:hot itself, but can't see a call through an alias, and says so; a
-	method it passes as a value is as stuck as one your code passes, and said so too
+	the warning test's main class: builds, never runs. A method it passes as a value is as
+	stuck as one your code passes, and said so too; a call through an alias is just a
+	call, and said nothing about
 **/
 class Main {
 	static function main() {

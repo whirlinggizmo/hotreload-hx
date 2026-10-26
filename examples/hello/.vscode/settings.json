@@ -1,8 +1,7 @@
 {
 	// what the Haxe extension completes and checks with (and what "haxe: active
-	// configuration" builds): the debug build, since a hot build's config only matters
-	// when it runs
+	// configuration" builds): the page's build, with source maps
 	"haxe.configurations": [
-		["common.hxml", "-debug", "--cpp", "out/debug"]
+		["build.hxml", "-debug"]
 	]
 }

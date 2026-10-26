@@ -1,4 +1,4 @@
-/** a method passed as a value, which a reload can't re-point: warned about, on both targets; a lambda calling it, not **/
+/** a method passed as a value, which a reload can't re-point: warned about; a lambda calling it, not **/
 class Warn {
 	@:hot static var pending:Array<Int->Void> = [];
 

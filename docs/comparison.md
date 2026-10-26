@@ -5,6 +5,10 @@ debugger). The same file is in both repos:
 [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim/blob/main/docs/comparison.md)
 and [hotreload-hx](https://github.com/whirlinggizmo/hotreload-hx/blob/main/docs/comparison.md).
 
+**Since 2026-10-26, hotreload-hx reloads JS only.** Its hxcpp reload, measured here, is on
+its [`hxcpp`](https://github.com/whirlinggizmo/hotreload-hx/tree/hxcpp) branch; what this
+page says of hotreload-hx on hxcpp is of that branch.
+
 ## Summary
 
 Three ways to hot reload, and none best at everything: hotreload-hx on JS reloads fastest,

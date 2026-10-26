@@ -10,14 +10,14 @@ import js.Syntax;
 	and loads it with `import()` beside itself. Then, between two frames:
 
 	1. the old code's `@:beforeHotReload` hooks, and the main class's `beforeReload`;
-	2. the statics' values move to the new classes, by the same rule as native: a class
+	2. the statics' values move to the new classes: a class
 	   of the project's (the build lists them, and their `@:hot` statics: a resource, each
 	   bundle its own) has only its `@:hot` statics carried over, and the rest keep the
 	   value the new bundle gave them, their first; any other class (the main class, the
 	   standard library, a haxelib) has every one carried over. A new static keeps its first value, and one whose type
 	   the new code changed (the build records each class's statics' types,
 	   `__hot_types__`) is carried over when it's still the same kind of value
-	   (Slot.sameKind), and keeps its first value when not. (A static the new code doesn't
+	   (sameKind), and keeps its first value when not. (A static the new code doesn't
 	   have is carried anyway, unused: Haxe doesn't emit a static with no first value, so a
 	   class's JS can't tell one that's gone from one that's never been set.) A function
 	   that's a method of the old code (`onFrame = Guest.frame`) becomes the new code's;
@@ -233,7 +233,7 @@ class JsSwap {
 			for (key in statics(p.o))
 				if (!isMethod(p.n, key)) {
 					if (hot != null && (!hot.contains(key) || (wasHot != null && !wasHot.contains(key)))) {
-						// a plain static of the project's: the new code's first value, as natively. One
+						// a plain static of the project's: the new code's first value. One
 						// with none isn't emitted (Haxe leaves a null first value out too): null, not undefined
 						if (!Syntax.code("Object.prototype.hasOwnProperty.call({0}, {1})", p.n, key))
 							Reflect.setField(p.n, key, null);
@@ -244,8 +244,8 @@ class JsSwap {
 					var was:String = oldTypes == null ? null : Reflect.field(oldTypes, key);
 					var now:String = newTypes == null ? null : Reflect.field(newTypes, key);
 					if (was != null && now != null && was != now) {
-						// the new code declares another type: what still fits is carried over (Slot.sameKind, as natively)
-						if (Slot.sameKind(value, Reflect.field(p.n, key))) {
+						// the new code declares another type: what still fits is carried over
+						if (sameKind(value, Reflect.field(p.n, key))) {
 							log('static: ${p.name}.$key carried over (type changed: $was to $now)');
 						} else {
 							log('static: ${p.name}.$key started over (type changed: $was to $now)');
@@ -287,6 +287,28 @@ class JsSwap {
 				r.afterReload();
 		log('reload: done (${[for (p in pairs) if (p.carry) p].length} classes, $moved statics kept, $fresh started over, ${walker.objects} objects, '
 			+ '${Math.round((haxe.Timer.stamp() - start) * 1000)} ms)');
+	}
+
+	/**
+		Whether a value of one type can be carried to another: the same kind of value, or one
+		to a type with no first value (null). The rule for a `@:hot` static whose type changed
+	**/
+	static function sameKind(old:Dynamic, fresh:Dynamic):Bool {
+		var o = kind(old), f = kind(fresh);
+		if (f == "null")
+			return o == "null" || o == "object" || o == "string";
+		return o == f || o == "null";
+	}
+
+	static function kind(v:Dynamic):String {
+		return switch (Type.typeof(v)) {
+			case TNull: "null";
+			case TInt | TFloat: "number";
+			case TBool: "bool";
+			case TFunction: "function";
+			case TClass(c) if (c == String): "string";
+			default: "object";
+		}
 	}
 
 	/** a class's (or prototype's) own methods: its functions that aren't enumerable **/

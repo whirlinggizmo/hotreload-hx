@@ -22,7 +22,7 @@ using StringTools;
 /**
 	Hot reload for a JS build: builds it hot, serves it, and rebuilds it when a source
 	changes, and the page (or a node program) loads each new build in place of the
-	running one (Reloader.js.hx, JsSwap).
+	running one (Reloader, JsSwap).
 
 	```
 	haxe -lib hotreload-hx --run hotreload.DevServer [options] <build arguments>
@@ -35,7 +35,7 @@ using StringTools;
 	- `--mount <url>=<dir>`: serves a directory at a path too, as `--mount /assets=../assets`
 	- `--reload-define <name[=value]>`: a define for the reload's builds only, not the first:
 	  for something the page loads once, which the first build makes and a reload's needn't
-	  (a native host a guest runs in, say)
+	  (a wasm engine the page loads, say)
 	- `--no-compilation-server`: builds each reload with a `haxe` of its own
 	- `--stop-with-stdin`: stops when its standard input closes: for a program that starts
 	  it with a pipe there, so it stops when that program does, however that is (`serve`)

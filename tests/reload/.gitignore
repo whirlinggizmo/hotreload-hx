@@ -1,6 +1,0 @@
-# written by RunTests, from v1/ and v2/
-src/Game.hx
-src/game/
-# the assets the test saves while the program watches them
-assets/
-out/

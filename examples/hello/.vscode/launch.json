@@ -2,28 +2,13 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Hot (hxcpp)",
-			"type": "hxcpp",
+			// the page `haxe dev.hxml` serves (start it first): breakpoints in src/*.hx, through
+			// the source maps, in the new code too after a reload
+			"name": "Hot (Chrome)",
+			"type": "chrome",
 			"request": "launch",
-			"internalConsoleOptions": "openOnSessionStart",
-			"preLaunchTask": "build hot",
-			"program": "${workspaceFolder}/out/hot/Main-debug",
-			"windows": {
-				"program": "${workspaceFolder}/out/hot/Main-debug.exe"
-			},
-			"cwd": "${workspaceFolder}"
-		},
-		{
-			"name": "Debug (hxcpp)",
-			"type": "hxcpp",
-			"request": "launch",
-			"internalConsoleOptions": "openOnSessionStart",
-			"preLaunchTask": "build debug",
-			"program": "${workspaceFolder}/out/debug/Main-debug",
-			"windows": {
-				"program": "${workspaceFolder}/out/debug/Main-debug.exe"
-			},
-			"cwd": "${workspaceFolder}"
+			"url": "http://localhost:8080/",
+			"webRoot": "${workspaceFolder}/web"
 		}
 	]
 }

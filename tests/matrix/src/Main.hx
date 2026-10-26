@@ -1,18 +1,19 @@
-import game.Held;
-
+/**
+	The matrix's main class (node): ticking on a timer. It calls Game.tick through the
+	class, as Haxe code does, so a reload's new tick is the one called
+**/
 class Main {
 	static function main() {
 		var reloader = new hotreload.Reloader();
+		reloader.assetsChanged = urls -> Sys.println("main: assetsChanged " + urls.join(","));
 		var held = Game.makeHeld(); // S14: an object of a reloaded class, kept by main
 		var callback = Game.makeCallback(); // S10: a callback reloaded code handed to main
 		var n = 0;
-		while (true) {
-			reloader.update();
+		js.Syntax.code("setInterval({0}, 50)", () -> {
 			Game.tick();
 			if (n % 20 == 10)
 				Sys.println('main: held=${held.describe()} callback=${callback()}');
 			n++;
-			Sys.sleep(0.05);
-		}
+		});
 	}
 }
