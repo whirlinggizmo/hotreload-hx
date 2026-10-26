@@ -1,6 +1,6 @@
 class Game {
-	@:hot static var dispatcher:Dispatcher;
-	@:hot static var button:Button;
+	static var dispatcher:Dispatcher;
+	static var button:Button;
 
 	public static function start() {
 		dispatcher = new Dispatcher();

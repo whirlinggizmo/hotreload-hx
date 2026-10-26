@@ -6,14 +6,14 @@ import game.Held;
 typedef Stats = {hp:Int};
 
 class Game {
-	@:hot static var ticks = 0;
-	@:hot static var enemies:Array<Enemy> = pair();
-	@:hot static var stats:Array<Stats> = [{hp: 7}];
-	@:hot static var mood:Mood = Happy(1);
-	@:hot static var pet:Animal = new Dog();
-	@:hot static var fn:() -> String = () -> "v1 closure";
-	@:hot static var label = 7;
-	@:hot static var fromCallback = 0;
+	static var ticks = 0;
+	static var enemies:Array<Enemy> = pair();
+	static var stats:Array<Stats> = [{hp: 7}];
+	static var mood:Mood = Happy(1);
+	static var pet:Animal = new Dog();
+	static var fn:() -> String = () -> "v1 closure";
+	static var label = 7;
+	static var fromCallback = 0;
 	static var started = false;
 
 	static function pair() {
@@ -36,7 +36,7 @@ class Game {
 		report();
 	}
 
-	@:hot public static function tick() {
+	public static function tick() {
 		ticks++;
 		if (!started) {
 			started = true;

@@ -2,16 +2,17 @@
 """The behavior test: a program served with hotreload.DevServer and run in node, edited as
 it runs, and its builds. It checks the rules for statics:
 
-- a @:hot static is kept, wherever it is; a plain static of the project's starts over from
-  its (new) first value, or its type's default; a new one starts from its first value;
-- a @:hot static whose type changed is kept when it's still the same kind of value
-  (Int to Float), and starts over when not (Int to String), with a message;
-- a @:hot (default, null) static with no first value, set by the main class, is kept;
+- every static is kept, whatever its class; one whose first value was edited resets to
+  the new one, with a message; one marked @:resetOnHotReload resets on every reload, said
+  nothing about; a new one starts from its first value;
+- a static whose type changed and first value didn't is kept when it's still the same
+  kind of value (Int to Float), and resets when not (Int to String), with a message;
+- a (default, null) static with no first value, set by the main class, is kept;
 - a computed static property, (get, never), builds and reads its getter (it has no value to keep);
 - the main class's statics are kept;
-- a completion made in the reloaded code before a reload (a lambda calling a @:hot function
-  by name), held by the main class, reaches the new code after it;
-- a method of your code passed as a value is warned about;
+- a completion made in the reloaded code before a reload (a lambda calling a function by
+  name), held by the main class, reaches the new code after it;
+- a method of your code passed as a value is warned about, and so is @:hot, deprecated;
 - a class whose statics have no type written builds before the classes it uses, as
   without hotreload: another class's build macro that needs its own to have run first
   isn't run early;
@@ -42,16 +43,18 @@ from drive import Program, edit, install
 LOGS = os.path.join(HERE, "logs")
 OUTSIDE = os.path.join(HERE, "src", "Outside.hx")
 
-# outside=<count>,<tag>,<n>,<list.length>: the main class sets them to 5,t,5,1; a reload
-# starts them over (Outside is the project's)
+# outside=<count>,<tag>,<n>,<list.length>: the main class sets them to 5,t,5,1, and no
+# reload edits them, so they're kept
 EXPECTED = {
-    "v1": "report v1 kept=5 doubled=10 plain=5 widened=3 label=7 service=on outside=5,t,5,1 main=5 loaded=v1:7",
-    "v2": "report v2 kept=5 doubled=10 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v2:8",
+    "v1": "report v1 kept=5 doubled=10 tuned=5 widened=3 label=7 mode=5 cache=5 service=on outside=5,t,5,1 main=5 loaded=v1:7",
+    "v2": "report v2 kept=5 doubled=10 tuned=2 widened=3 label=seven mode=null cache=1 added=42 service=on outside=5,t,5,1 main=5 loaded=v2:8",
     # the completion v2 made reaches v3's onLoaded
-    "v3": "report v3 kept=5 doubled=10 plain=2 widened=3 label=seven added=42 service=on outside=0,null,0,0 main=5 loaded=v3:8",
-    "types": [
-        "hotreload: static: game.State.label started over (type changed: Int to String)",
-        "hotreload: static: game.State.widened carried over (type changed: Int to Float)",
+    "v3": "report v3 kept=5 doubled=10 tuned=2 widened=3 label=seven mode=null cache=1 added=42 service=on outside=5,t,5,1 main=5 loaded=v3:8",
+    "statics": [
+        'hotreload: static: game.State.label reset (initial value changed: 7 to "seven")',
+        "hotreload: static: game.State.mode reset (type changed: Int to String)",
+        "hotreload: static: game.State.tuned reset (initial value changed: 1 to 2)",
+        "hotreload: static: game.State.widened kept (type changed: Int to Float)",
     ],
 }
 
@@ -73,7 +76,7 @@ def scenario(p, logs):
     result["v2"] = p.wait(r"^report v2", timeout=120)
     install(os.path.join(HERE, "v3"), os.path.join(HERE, "src"))
     result["v3"] = p.wait(r"^report v3", timeout=120)
-    result["types"] = sorted(set(l.strip() for log in logs for l in open(log) if "type changed" in l))
+    result["statics"] = sorted(set(l.strip() for log in logs for l in open(log) if "hotreload: static:" in l))
     return result
 
 
@@ -334,6 +337,7 @@ WARNINGS = sorted([
     "warn/Main.hx:12: characters 14-24 : Warning : hotreload: later passed as a value keeps its old code after a reload; call it from a lambda, x -> later(x)",
     "warn/Warn.hx:14: characters 8-15 : Warning : hotreload: place passed as a value keeps its old code after a reload; call it from a lambda, x -> place(x)",
     "warn/Warn.hx:15: characters 8-16 : Warning : hotreload: placeAll passed as a value keeps its old code after a reload; call it from a lambda, x -> placeAll(x)",
+    "warn/Warn.hx:3: characters 2-7 : Warning : hotreload: @:hot is deprecated: every static is kept now. Remove it, or use @:resetOnHotReload to reset a static on every reload.",
 ])
 
 

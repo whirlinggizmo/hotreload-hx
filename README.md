@@ -84,7 +84,7 @@ watches are the build's own class paths (`-cp`), not its libraries', even in a l
 repository (`haxelib newrepo`'s `.haxelib/`) inside the project (`hotreload: watch:
 excluding` names those). `watch` names more directories to watch, without making them the
 project's: a library's checkout you edit while the program runs, say
-(`watch: ["../helix/src"]`), whose statics are then kept as a library's are. With
+(`watch: ["../helix/src"]`). With
 `background: true`, `serve` returns
 once the server is serving and leaves it running, detached from the terminal, its messages
 in `.hotreload-<port>.log` (or `log`), until it's stopped:
@@ -143,77 +143,84 @@ cd examples/hello
 haxe dev.hxml
 ```
 
-Open `http://localhost:8080/`. It prints a greeting a few times a second. Change the
-greeting in `src/Hello.hx` and save:
+Open `http://localhost:8080/`. It prints a greeting a few times a second. Change `name`'s
+first value in `src/Hello.hx` and save:
 
 ```
 Hello, world! (ticks: 12, since the last reload: 12)
 hello: reloading...
+hotreload: static: Hello.name reset (initial value changed: "world" to "Rob")
 hello: reloaded
-Howdy, world! (ticks: 16, since the last reload: 1)
+Hello, Rob! (ticks: 16, since the last reload: 1)
 ```
 
-`ticks` is a `@:hot` static, so it keeps counting; `sinceReload` is a plain static, so it
-starts over. The greeting's first word comes from `assets/greeting.txt`; edit it and the
-next greeting uses it, with nothing rebuilt. `haxe build.hxml` is its release build, and its
-`.vscode/` has a Chrome launch configuration for debugging the page while it reloads.
+`ticks` is kept, so it keeps counting; `name`'s first value was edited, so it's the new one;
+`sinceReload` is marked `@:resetOnHotReload`, so it starts over. The greeting's first word
+comes from `assets/greeting.txt`; edit it and the next greeting uses it, with nothing
+rebuilt. `haxe build.hxml` is its release build, and its `.vscode/` has a Chrome launch
+configuration for debugging the page while it reloads.
 
 ## The rules
 
-There are two: *a static of yours survives a reload if it says `@:hot`*, and *a closure
-made before a reload runs its own code, though what it calls by name is new*. The rest of
-this section is what they mean in practice.
+There are two: *a static keeps its value across a reload, unless you edited its first
+value*, and *a closure made before a reload runs its own code, though what it calls by name
+is new*. There's nothing to mark. The rest of this section is what they mean in practice.
 
 ### Your code, the main class, and libraries
 
-hotreload tells three kinds of code apart:
+hotreload tells three kinds of code apart, though only for what it watches and warns about:
 
 - **Your code:** the classes in the project's own class paths (the `-cp` directories inside
-  the project). This is what you edit while the application runs.
+  the project). This is what's watched, and what the build warns about.
 - **The main class:** reloaded like the rest, but its `main` doesn't run again.
-- **Libraries:** the standard library and haxelibs, reloaded with the bundle.
+- **Libraries:** the standard library and haxelibs, reloaded with the bundle. A library's
+  checkout you edit can be watched too (`watch`).
 
-Every class takes on its new code on a reload. The rules for statics below are for your
-code. The main class's and a library's statics keep their values across every reload.
+Every class takes on its new code on a reload, and the rules for statics are the same for
+all of them.
 
 ### Statics
 
-In your code, a `@:hot` static keeps its value across reloads, and a plain static starts over
-from its first value on every reload:
+A static keeps its value across reloads:
 
 ```haxe
-@:hot static var score = 0;
-@:hot static var enemies:Array<Enemy> = [];
-static var frameCount = 0; // starts over on each reload
+static var score = 0;
+static var enemies:Array<Enemy> = [];
 ```
 
-A `@:hot` static's first value is only used when it's first made, so editing it changes
-nothing while the application runs. To change a kept value, assign it, for example in an
-`@:afterHotReload` hook. A plain static's first value is used again on each reload, so an
-edit to it takes effect.
+Except:
 
-If a reload changes a `@:hot` static's type, its value is kept when it's still the same kind
-(number, bool, string, object), and reset otherwise, with a message:
+- **Its first value was edited:** it resets to the new one. Change `static var speed = 3.0;`
+  to `4.0`, save, and `speed` is `4.0`, whatever the program had set it to. The first value
+  is compared as written, so an edit elsewhere that changes what it computes (a constant it
+  reads, a function it calls) doesn't reset it.
+- **It's marked `@:resetOnHotReload`:** it resets to its first value on every reload. For
+  what's derived from code, such as a cache or a lookup table, that should be made again by
+  the new code:
+
+  ```haxe
+  @:resetOnHotReload static var layout = computeLayout();
+  ```
+
+- **Its type was changed, and its first value wasn't:** its value is kept when it's still
+  the same kind (number, bool, string, object), and reset otherwise.
+
+A reset is said, but for `@:resetOnHotReload`'s:
 
 ```
-hotreload: static: game.State.label started over (type changed: Int to String)
+hotreload: static: game.Tuning.speed reset (initial value changed: 3.0 to 4.0)
+hotreload: static: game.State.mode reset (type changed: Int to String)
+hotreload: static: game.State.widened kept (type changed: Int to Float)
 ```
 
-`@:hot` takes a static var. A var needs a type, or a first value that says it: a literal,
-`new T()` or a cast (`static var hits = 0`; `static var hits:Int = count()`). It can also be
-read-only from outside, `(default, null)` or `(default, never)`:
+A new static starts from its first value. One with no first value is `null` until the
+program sets it. `@:resetOnHotReload` and the hooks can't be used on an instance field:
+it's a build error. `@:hot`, which marked the statics a reload kept before every static was
+kept, does nothing, and the build warns where it's written.
 
-```haxe
-@:hot public static var graphics(default, null):Graphics; // everyone reads it; only its class sets it
-```
-
-`@:hot` and the hooks can't be used in the main class, on an instance field, or on a
-property with accessors: each is a build error. `@:hot` on a static function is accepted
-and changes nothing: every call reaches the new code.
-
-What a `@:hot` static holds survives with it. On each reload, the objects reachable from the
-statics take on the new classes in place, so every reference to them stays good. A new
-field starts from its initializer:
+What a static holds survives with it. On each reload, the objects reachable from the statics
+take on the new classes in place, so every reference to them stays good. A new field starts
+from its initializer:
 
 ```haxe
 class Enemy {
@@ -285,8 +292,8 @@ connections.
 
 - Every class takes on its new code, the main class included, and signature changes need
   no restart, since every caller reloads too.
-- Statics follow [the rules](#statics): your code's `@:hot` statics are kept and its plain
-  ones start over; the main class's and libraries' are kept.
+- Statics follow [the rules](#statics): kept, but for an edited first value and
+  `@:resetOnHotReload`.
 - Objects the kept statics hold get the new classes in place. New fields start from their
   initializers, and enum values are rebuilt by constructor name.
 - Old classes forward to the new ones, so leftover old code (a callback, an object nothing
@@ -331,7 +338,7 @@ Other targets build without hot reload, with a warning.
 haxelib.json             the package: classPath src
 extraParams.hxml         --macro hotreload.Builder.init(), added by -lib hotreload-hx
 src/hotreload/
-  Builder.hx             the hot build: @:hot, reload hooks, what a carried object needs
+  Builder.hx             the hot build: statics' first values, reload hooks, what a carried object needs
   Reloader.hx            the reloader: the main class's callbacks
   JsSwap.hx              loading a new bundle and taking on its classes
   Hooks.hx               reload hooks

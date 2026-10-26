@@ -22,34 +22,29 @@ private enum Mode {
 /**
 	What makes a build hot: `--macro hotreload.Builder.init()` (which `-lib hotreload-hx` adds)
 	and `-D hotreload`, on a JS build. Without the define it does nothing, and the same
-	sources build one ordinary program: `@:hot` and the reload hooks are ignored.
+	sources build one ordinary program: the reload metadata is ignored.
 
 	A hot build reloads whole: the page loads the new bundle beside the old one, and the
-	reloader (Reloader, JsSwap) makes its classes the current ones, objects and all. Of the
-	project's classes, only the `@:hot` statics are carried over, and the rest start over;
-	the main class's, the standard library's and a haxelib's are all kept. What it takes
-	from here: the project's classes and their `@:hot` statics (a resource), a guard that
+	reloader (Reloader, JsSwap) makes its classes the current ones, objects and all. Every
+	static keeps its value, but one whose first value was edited, which starts over from
+	the new one, and one marked `@:resetOnHotReload`. What it takes from here: each
+	class's statics' types and first values, as written (`__hot_statics__`), a guard that
 	keeps a reloaded bundle's `main` from running again, each class's field initializers,
 	for the objects a reload carries over (their new fields start from them), the reload
 	hooks, a `$bind` that follows a bound method to its new code, and, for the DevServer,
 	how to build it again.
 **/
 class Builder {
-	/** a typed expression's type, as a string: a JS class's `__hot_types__` for a static with no type written **/
-	public static macro function typeName(e:haxe.macro.Expr):haxe.macro.Expr {
-		return macro $v{haxe.macro.Context.typeof(e).toString()};
-	}
-
 	#if macro
 	static var mode = Off;
 	static var mainClass:String;
-	/** the project's own class paths: its code, whose plain statics start over on a reload **/
+	/** the project's own class paths: its code, watched, and warned about **/
 	static var projectDirs:Array<String> = [];
 
 	/** the class paths inside the project's directory left out of it: its local repository's libraries **/
 	static var excludedDirs:Array<String> = [];
 
-	/** the main class's file, found from the class paths: never reloaded code **/
+	/** the main class's file, found from the class paths **/
 	static var mainFile:String;
 
 	static var configured = false;
@@ -121,18 +116,6 @@ class Builder {
 			if (configured)
 				return;
 			configured = true;
-			// the project's classes and their `@:hot` statics: the only statics of theirs a
-			// swap carries over (JsSwap). Read off the typed classes, every build (a reload's
-			// too), since a compilation server doesn't run a cached module's build macro
-			// again; and a resource, the bundle's own
-			var statics = new haxe.DynamicAccess<Array<String>>();
-			for (t in types)
-				switch (t) {
-					case TClassDecl(_.get() => c) if (isProject(c)):
-						statics.set(fullName(c.pack, c.name), [for (f in c.statics.get()) if (f.meta.has(":hot") && f.kind.match(FVar(_, _))) f.name]);
-					default:
-				}
-			Context.addResource("hotreload.statics", haxe.io.Bytes.ofString(haxe.Json.stringify(statics)));
 			// (a reload's build says it too when asked: the DevServer watches its class paths, which an edited hxml changes)
 			if (mode == JsReload && !Context.defined("hotreload_config"))
 				return;
@@ -205,7 +188,7 @@ class Builder {
 		excludedDirs = excluded;
 	}
 
-	/** whether a class is the project's own code, but the main class: one whose plain statics start over on a reload **/
+	/** whether a class is the project's own code, but the main class: one the build warns about **/
 	static function isProject(c:ClassType):Bool {
 		if (c.isExtern || c.isInterface || c.kind.match(KAbstractImpl(_)))
 			return false;
@@ -262,7 +245,7 @@ class Builder {
 		}
 	}
 
-	/** `@:build` on every class of a hot build: `@:hot` statics, the reload hooks, and what a carried object needs **/
+	/** `@:build` on every class of a hot build: its statics' types and first values, the reload hooks, and what a carried object needs **/
 	public static function build():Array<Field> {
 		var ref = Context.getLocalClass();
 		if (ref == null)
@@ -272,16 +255,15 @@ class Builder {
 	}
 
 	/**
-		What `@:hot` and the reload hooks can be on: a static var or function of a class
-		other than the main class; a hook, a static function with no parameters; a `@:hot`
-		var, one with a type or a first value (its type, which a reload compares)
+		What the reload metadata can be on: a hook (`@:beforeHotReload`, `@:afterHotReload`),
+		a static function with no parameters; `@:resetOnHotReload`, a static var that holds a
+		value. `@:hot`, which kept a static on the hxcpp branch, does nothing, and is warned
+		about where it's written: every static is kept
 	**/
-	static function checkHot(cls:ClassType, field:Field, hook:MetadataEntry) {
-		if (isMain(cls))
-			Context.error("@:hot and the reload hooks cannot be used in the main class because the main class is never reloaded. "
-				+ "Use them in the reloaded classes (for the main class's own, set reloader.beforeReload and reloader.afterReload)", field.pos);
+	static function checkMeta(field:Field, hook:MetadataEntry, reset:Bool) {
 		if (!field.access.contains(AStatic))
-			Context.error("@:hot and the reload hooks are for statics: an instance is carried across a reload with its fields", field.pos);
+			Context.error("the reload hooks and @:resetOnHotReload are for statics: an instance is carried across a reload with its fields",
+				field.pos);
 		if (hook != null) {
 			var fn = switch (field.kind) {
 				case FFun(f): f;
@@ -289,97 +271,50 @@ class Builder {
 			}
 			if (fn.args.length > 0)
 				Context.error('@${hook.name}: a function with no parameters', field.pos);
-			return;
 		}
-		switch (field.kind) {
-			case FVar(null, null) | FProp(_, _, null, null):
-				Context.error("@:hot: give it a type, or a first value", field.pos);
-			case FProp("default", "default" | "null" | "never", _, _):
-			case FProp(_, _, _, _):
-				Context.error("@:hot: a static var or function, or a (default, null) or (default, never) one; not a property with accessors", field.pos);
-			default:
-		}
+		if (reset && (field.kind.match(FFun(_)) || field.access.contains(AInline) || !hasStorage(field)))
+			Context.error("@:resetOnHotReload: a static var that holds a value", field.pos);
 	}
 
-	/**
-		a `@:hot` var's type, and that type as a reload compares it: the one written, or else
-		the one its first value says (`writtenType`)
-	**/
-	static function hotType(field:Field, t:ComplexType, e:Expr):{t:ComplexType, sig:String} {
-		if (t == null)
-			t = writtenType(e);
-		if (t == null)
-			Context.error("@:hot: give it a type (its first value does not say it: a literal, `new T()` or a cast would)", field.pos);
-		return {t: t, sig: try Context.resolveType(t, field.pos).toString() catch (_) t.toString()};
+	/** a first value as written, shortened for a message: `3.0`, `"seven"`, `new Map()` **/
+	static function shortText(e:Expr):String {
+		var text = ~/\s+/g.replace(e.toString(), " ");
+		return text.length > 40 ? text.substr(0, 37) + "..." : text;
 	}
 
-	/**
-		the type an expression says as written: a literal's, `new T()`'s, a cast's or a check's
-		(`(e : T)`), an array of them; else null. Not typed: typing an expression while a class
-		is built (Context.typeof) builds the classes it reaches early, before this one has its
-		fields and its other build macros have run, which breaks theirs
-	**/
-	static function writtenType(e:Expr):ComplexType {
-		if (e == null)
-			return null;
-		return switch (e.expr) {
-			case EConst(CInt(_)): macro:Int;
-			case EConst(CFloat(_)): macro:Float;
-			case EConst(CString(_)): macro:String;
-			case EConst(CRegexp(_)): macro:EReg;
-			case EConst(CIdent("true" | "false")): macro:Bool;
-			case EParenthesis(e) | EMeta(_, e) | EUnop(OpNeg, false, e): writtenType(e);
-			case ENew(tp, _): TPath(tp);
-			case ECheckType(_, t) | ECast(_, t) if (t != null): t;
-			case EArrayDecl(values) if (values.length > 0):
-				var t = writtenType(values[0]);
-				if (t == null || values.exists(v -> writtenType(v) == null || writtenType(v).toString() != t.toString()))
-					null;
-				else
-					TPath({pack: [], name: "Array", params: [TPType(t)]});
-			default: null;
-		}
-	}
-
-	/** a class: its hooks, its main's guard, its field initializers, and its statics' types **/
+	/** a class: its hooks, its main's guard, its field initializers, and its statics' types and first values **/
 	static function buildJs(cls:ClassType, fields:Array<Field>, className:String):Array<Field> {
 		var changed = false;
 		var result = [];
 		var extra = [];
-		var types = [];
+		var statics = [];
 		for (field in fields) {
-			var hot = field.meta.exists(m -> m.name == ":hot");
 			var hook = field.meta.find(m -> m.name == ":beforeHotReload" || m.name == ":afterHotReload");
-			if (hot || hook != null)
-				checkHot(cls, field, hook);
-			// a static's type, as written (or its first value's): a reload that changes it
-			// carries the value over only when it's still the same kind (JsSwap.sameKind)
-			if (field.access.contains(AStatic))
+			var reset = field.meta.exists(m -> m.name == ":resetOnHotReload");
+			if (hook != null || reset)
+				checkMeta(field, hook, reset);
+			var hot = field.meta.find(m -> m.name == ":hot");
+			if (hot != null && mode == Js)
+				Context.warning("hotreload: @:hot is deprecated: every static is kept now. "
+					+ "Remove it, or use @:resetOnHotReload to reset a static on every reload.", hot.pos);
+			// a static's type and first value, as written, which a reload compares (JsSwap): a
+			// first value edited starts it over from the new one; a type changed keeps the value
+			// when it's still the same kind. (A property with no storage, `(get, never)`,
+			// holds no value: nothing to keep)
+			if (field.access.contains(AStatic) && !field.access.contains(AInline))
 				switch (field.kind) {
-					case FVar(t, e) | FProp("default", _, t, e) if (hot):
-						types.push({field: field.name, expr: macro $v{hotType(field, t, e).sig}});
-					// (a property with no storage, `(get, never)`, holds no value: nothing to compare,
-					// and no first value to give it: Haxe refuses one)
 					case FVar(t, e) | FProp(_, _, t, e) if (hasStorage(field)):
-						// (one with no type written: its own, once it's typed, not its first value's now: see writtenType)
+						var info:Array<ObjectField> = [];
 						if (t != null)
-							types.push({field: field.name, expr: macro $v{t.toString()}});
-						else if (e != null)
-							types.push({field: field.name, expr: macro hotreload.Builder.typeName($i{field.name})});
-						// a plain static with no first value: 0 or false for a number or a bool (JS
-						// wouldn't emit it, and a reload would leave it undefined; a null one is left
-						// out either way, and the swap gives it null)
-						if (e == null && !field.access.contains(AInline) && isProject(cls)) {
-							var def = defaultOf(t, field.pos);
-							if (def != null && !def.expr.match(EConst(CIdent("null")))) {
-								field.kind = switch (field.kind) {
-									case FVar(t, _): FVar(t, def);
-									case FProp(g, s, t, _): FProp(g, s, t, def);
-									default: field.kind;
-								}
-								changed = true;
-							}
+							info.push({field: "type", expr: macro $v{t.toString()}});
+						if (e != null) {
+							info.push({field: "init", expr: macro $v{haxe.crypto.Md5.encode(e.toString())}});
+							info.push({field: "text", expr: macro $v{shortText(e)}});
 						}
+						if (reset)
+							info.push({field: "reset", expr: macro true});
+						if (info.length > 0)
+							statics.push({field: field.name, expr: {expr: EObjectDecl(info), pos: field.pos}});
 					default:
 				}
 			if (hook != null) {
@@ -405,8 +340,8 @@ class Builder {
 		}
 		var file = fileOf(cls.pos);
 		var abstractImpl = cls.kind.match(KAbstractImpl(_)) || Context.getLocalType().match(TAbstract(_, _));
-		if (types.length > 0 && !cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
-			extra.push(staticVar("__hot_types__", macro:Dynamic, {expr: EObjectDecl(types), pos: cls.pos}, cls.pos));
+		if (statics.length > 0 && !cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
+			extra.push(staticVar("__hot_statics__", macro:Dynamic, {expr: EObjectDecl(statics), pos: cls.pos}, cls.pos));
 			changed = true;
 		}
 		if (!cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
@@ -449,27 +384,6 @@ class Builder {
 			kind: FFun({args: [], ret: macro:Void, expr: macro $b{inits}}),
 			pos: Context.currentPos(),
 		};
-	}
-
-	/**
-		A static's value when it has no first value: 0 for a number, false for a bool, null
-		otherwise; or null when the type can't be found here. A static with no first value
-		isn't emitted at all, so the build gives it this as its first value, and a reload
-		that starts it over gives it this, not undefined
-	**/
-	static function defaultOf(t:ComplexType, pos:Position):Expr {
-		if (t == null)
-			return null;
-		var type = try Context.resolveType(t, pos) catch (_) return null;
-		return switch (Context.follow(type)) {
-			case TAbstract(_.get() => a, _) if (a.name == "Null" && a.pack.length == 0): macro null;
-			case followed:
-				switch (Context.followWithAbstracts(followed)) {
-					case TAbstract(_.get() => a, _) if (a.pack.length == 0 && (a.name == "Int" || a.name == "Float")): macro cast 0;
-					case TAbstract(_.get() => a, _) if (a.pack.length == 0 && a.name == "Bool"): macro cast false;
-					default: macro null;
-				}
-		}
 	}
 
 	/**

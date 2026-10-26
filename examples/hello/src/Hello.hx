@@ -7,14 +7,13 @@ using StringTools;
 	saved.
 **/
 class Hello {
-	// kept across reloads. Its first value is used once, when it's made: an edit here
-	// changes nothing while it runs; to change it, assign it (in sayReloaded, say)
-	@:hot static var name = "world";
+	// kept across reloads, until its first value is edited: then it's the new one
+	static var name = "world";
 
-	@:hot static var ticks = 0; // kept: it counts on through each reload
-	static var sinceReload = 0; // a plain static: starts over with each reload
+	static var ticks = 0; // kept: it counts on through each reload
+	@:resetOnHotReload static var sinceReload = 0; // starts over with each reload
 
-	@:hot static var greeting = "Hello"; // read from assets/greeting.txt
+	static var greeting = "Hello"; // read from assets/greeting.txt
 
 	public static function onStart() {
 		readGreeting();

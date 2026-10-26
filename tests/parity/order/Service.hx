@@ -7,8 +7,8 @@ import Facade;
 @:build(Mark.record())
 class Service {
 	public static var MAX = 8 * 1024;
-	@:hot static var made = new haxe.ds.StringMap<Int>();
+	static var made = new haxe.ds.StringMap<Int>();
 
-	@:hot public static function size(scale = 2):Int
+	public static function size(scale = 2):Int
 		return MAX * scale + Facade.extra();
 }

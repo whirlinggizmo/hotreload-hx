@@ -55,12 +55,12 @@ def matrix():
         held = [l for l in open(os.path.join(LOGS, "matrix.log")) if l.startswith("main:")]
         print("    | " + held[-1].strip() + "   (S10, S14: kept by the main class)")
 
-        step("S6: a hot static's type, Int -> String")
-        edit(game, "@:hot static var label = 7;", '@:hot static var label = "seven";')
+        step("S6: a static's first value and type, 7 -> \"seven\"")
+        edit(game, "static var label = 7;", 'static var label = "seven";')
         p.wait(r"^report v2")
 
-        step("S13: a @:hot function's signature")
-        edit(game, "@:hot public static function tick()", "@:hot public static function tick(n:Int = 1)")
+        step("S13: a function's signature")
+        edit(game, "public static function tick()", "public static function tick(n:Int = 1)")
         p.wait(r"^report v2|reload: done")
 
         step("S15: a compile error, then the fix (the terminal has the error)")

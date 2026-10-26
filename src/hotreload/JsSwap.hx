@@ -10,14 +10,12 @@ import js.Syntax;
 	and loads it with `import()` beside itself. Then, between two frames:
 
 	1. the old code's `@:beforeHotReload` hooks, and the main class's `beforeReload`;
-	2. the statics' values move to the new classes: a class
-	   of the project's (the build lists them, and their `@:hot` statics: a resource, each
-	   bundle its own) has only its `@:hot` statics carried over, and the rest keep the
-	   value the new bundle gave them, their first; any other class (the main class, the
-	   standard library, a haxelib) has every one carried over. A new static keeps its first value, and one whose type
-	   the new code changed (the build records each class's statics' types,
-	   `__hot_types__`) is carried over when it's still the same kind of value
-	   (sameKind), and keeps its first value when not. (A static the new code doesn't
+	2. the statics' values move to the new classes, every class's alike. The build
+	   records each class's statics' types and first values as written
+	   (`__hot_statics__`): a static whose first value was edited keeps the new one, as
+	   does one marked `@:resetOnHotReload`; one whose type was changed is carried over
+	   when it's still the same kind of value (sameKind), and keeps its first value when
+	   not; the rest are carried over. A new static keeps its first value. (A static the new code doesn't
 	   have is carried anyway, unused: Haxe doesn't emit a static with no first value, so a
 	   class's JS can't tell one that's gone from one that's never been set.) A function
 	   that's a method of the old code (`onFrame = Guest.frame`) becomes the new code's;
@@ -50,13 +48,6 @@ class JsSwap {
 		var bundle = {
 			classes: Syntax.code("$hxClasses"),
 			enums: Syntax.code("(typeof $hxEnums != 'undefined' ? $hxEnums : {})"),
-			// the project's classes, by name, and their `@:hot` statics (Builder): read when
-			// a swap asks, by the bundle's own code, since this runs before its statics are
-			// made (haxe.Resource's decoder's among them)
-			hot: () -> {
-				var hot = haxe.Resource.getString("hotreload.statics");
-				return hot == null ? {} : haxe.Json.parse(hot);
-			},
 			self: self,
 		};
 		var bundles:Array<Dynamic> = state.bundles;
@@ -218,43 +209,41 @@ class JsSwap {
 
 		// the statics' values, and what they hold
 		var walker = new Walker(protos, classes, functions, old.enums, neu.enums);
-		var moved = 0;
-		var fresh = 0;
-		var newHot:Dynamic = neu.hot();
-		var oldHot:Dynamic = old.hot();
+		var kept = 0;
+		var reset = 0;
 		for (p in pairs) {
 			if (!p.carry)
 				continue; // the first bundle's statics already read the old one's
-			// a project class's `@:hot` statics, if it is one (and was): null for every static
-			var hot:Array<String> = Reflect.field(newHot, p.name);
-			var wasHot:Array<String> = Reflect.field(oldHot, p.name);
-			var oldTypes:Dynamic = Reflect.field(p.o, "__hot_types__");
-			var newTypes:Dynamic = Reflect.field(p.n, "__hot_types__");
+			var was:Dynamic = Reflect.field(p.o, "__hot_statics__");
+			var now:Dynamic = Reflect.field(p.n, "__hot_statics__");
 			for (key in statics(p.o))
 				if (!isMethod(p.n, key)) {
-					if (hot != null && (!hot.contains(key) || (wasHot != null && !wasHot.contains(key)))) {
-						// a plain static of the project's: the new code's first value. One
-						// with none isn't emitted (Haxe leaves a null first value out too): null, not undefined
+					var w:Dynamic = was == null ? null : Reflect.field(was, key);
+					var n:Dynamic = now == null ? null : Reflect.field(now, key);
+					var value:Dynamic = Reflect.field(p.o, key);
+					var why = null;
+					if (n != null && n.reset == true) {
+						why = ""; // every reload: not said
+					} else if (n != null && n.init != null && (w == null || w.init != n.init)) {
+						why = 'initial value changed: ${w == null || w.text == null ? "none" : w.text} to ${n.text}';
+					} else if (w != null && n != null && w.type != null && n.type != null && w.type != n.type) {
+						// the new code declares another type: what still fits is carried over
+						if (sameKind(value, Reflect.field(p.n, key)))
+							log('static: ${p.name}.$key kept (type changed: ${w.type} to ${n.type})');
+						else
+							why = 'type changed: ${w.type} to ${n.type}';
+					}
+					if (why != null) {
+						// the new code's first value. One with none isn't emitted (Haxe leaves a null first value out too): null, not undefined
 						if (!Syntax.code("Object.prototype.hasOwnProperty.call({0}, {1})", p.n, key))
 							Reflect.setField(p.n, key, null);
-						fresh++;
+						if (why != "")
+							log('static: ${p.name}.$key reset ($why)');
+						reset++;
 						continue;
 					}
-					var value:Dynamic = Reflect.field(p.o, key);
-					var was:String = oldTypes == null ? null : Reflect.field(oldTypes, key);
-					var now:String = newTypes == null ? null : Reflect.field(newTypes, key);
-					if (was != null && now != null && was != now) {
-						// the new code declares another type: what still fits is carried over
-						if (sameKind(value, Reflect.field(p.n, key))) {
-							log('static: ${p.name}.$key carried over (type changed: $was to $now)');
-						} else {
-							log('static: ${p.name}.$key started over (type changed: $was to $now)');
-							fresh++;
-							continue;
-						}
-					}
 					Reflect.setField(p.n, key, walker.visit(value));
-					moved++;
+					kept++;
 				}
 		}
 		walker.finish();
@@ -285,13 +274,13 @@ class JsSwap {
 		for (r in reloaders)
 			if (r.afterReload != null)
 				r.afterReload();
-		log('reload: done (${[for (p in pairs) if (p.carry) p].length} classes, $moved statics kept, $fresh started over, ${walker.objects} objects, '
+		log('reload: done (${[for (p in pairs) if (p.carry) p].length} classes, $kept statics kept, $reset reset, ${walker.objects} objects, '
 			+ '${Math.round((haxe.Timer.stamp() - start) * 1000)} ms)');
 	}
 
 	/**
 		Whether a value of one type can be carried to another: the same kind of value, or one
-		to a type with no first value (null). The rule for a `@:hot` static whose type changed
+		to a type with no first value (null). The rule for a static whose type changed
 	**/
 	static function sameKind(old:Dynamic, fresh:Dynamic):Bool {
 		var o = kind(old), f = kind(fresh);

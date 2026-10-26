@@ -113,10 +113,10 @@ import {pkg}.C0;
 import {pkg}.C{n - 1};
 
 class Game {{
-	@:hot static var seen = "";
-	@:hot static var total = 0;
+	static var seen = "";
+	static var total = 0;
 
-	@:hot public static function tick() {{
+	public static function tick() {{
 		var v = "version v0 " + C{n - 1}.tag();
 		if (v != seen) {{
 			seen = v;
