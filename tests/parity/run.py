@@ -26,6 +26,8 @@ statics:
   directory, isn't the project's: its code isn't warned about, nor its directory watched;
 - the DevServer builds from its hxml as it is now: a class path added to an hxml the
   build names (or one it names) while it runs is built with, and watched;
+- on JS, a listener added as a bound method before a reload (addEventListener(CLICK,
+  onClick)) runs the new code after it, and the new code can remove it;
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
@@ -256,6 +258,40 @@ def dev_relist():
         server.stop()
 
 
+def dev_bind():
+    """a copy of bind/ served and run in node, a listener added as a bound method before a
+    reload (OpenFL's addEventListener(CLICK, onClick)): whether after each of two reloads it
+    runs the new code, and the new code removes it. Its lines, or None"""
+    print("\n== a bound method passed as a value, across a reload (JS)")
+    work = os.path.join(HERE, "out", "bind")
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(HERE, "bind"), work)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = Program(work, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
+                     os.path.join(LOGS, "dev-bind-server.log"))
+    p = None
+    try:
+        if not server.wait(r"hotreload: ready", timeout=120, show=False):
+            return None
+        env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
+        p = Program(work, ["node", "out/main.js"], os.path.join(LOGS, "dev-bind.log"), env=env)
+        if not p.wait(r"^click v1", timeout=30):
+            return None
+        # two reloads: the second's listener was added by the first reload's code
+        for v in ["v2", "v3"]:
+            edit(os.path.join(work, "src", "Button.hx"), '"click ' + {"v2": "v1", "v3": "v2"}[v] + '"', f'"click {v}"')
+            if not p.wait(r"^removed=", timeout=60):
+                return None
+        # (lines can come together in one read: taken from the log)
+        return [l for l in open(p.log).read().splitlines() if l.startswith(("click v", "removed="))]
+    finally:
+        if p:
+            p.stop()
+        server.stop()
+
+
 def server(target):
     """the program built through a compilation server, as the DevServer and an editor do:
     four builds, the later ones from the server's cache, into an output directory that
@@ -297,6 +333,10 @@ WARNINGS = sorted([
 ])
 
 
+# the listener's lines: before the reloads, then after each one, the new code's, and removed by it
+DEV_BIND = ["click v1", "click v2", "removed=true listeners=0", "click v3", "removed=true listeners=0"]
+
+
 def check(name, result):
     """what one target did, against what's expected"""
     failures = 0
@@ -323,6 +363,9 @@ def check(name, result):
     if result.get("dev_relist") is False:
         print(f"  FAILED {name}: the DevServer didn't build with a class path added to its hxml as it ran")
         failures += 1
+    if "dev_bind" in result and result["dev_bind"] != DEV_BIND:
+        print(f"  FAILED {name}, a bound method across reloads: {result['dev_bind']!r}, expected {DEV_BIND!r}")
+        failures += 1
     if result.get("dev_output") is False:
         print(f"  FAILED {name}: the DevServer's build warnings didn't come before it served")
         failures += 1
@@ -346,6 +389,7 @@ if __name__ == "__main__":
         if t == "js":
             results[t]["dev_output"] = dev_output()
             results[t]["dev_relist"] = dev_relist()
+            results[t]["dev_bind"] = dev_bind()
         results[t]["server"] = server(t)
     print("\n== results")
     failures = sum(check(t, r) for t, r in results.items())

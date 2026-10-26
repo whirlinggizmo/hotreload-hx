@@ -221,6 +221,8 @@ class Builder {
 		var cwd = Path.addTrailingSlash(Sys.getCwd());
 		findProject(args, cwd);
 		var path = Context.defined("hotreload_config") ? Context.definedValue("hotreload_config") : absolute(cwd, js) + ".hotreload.json";
+		var output = absolute(cwd, js);
+		Context.onAfterGenerate(() -> lateBind(output));
 		Context.onAfterTyping(types -> {
 			warnMethodValues(types);
 			checkMainCalls(types);
@@ -256,6 +258,33 @@ class Builder {
 				sys.FileSystem.createDirectory(Path.directory(path));
 			sys.io.File.saveContent(path, haxe.Json.stringify(config, "\t"));
 		});
+	}
+
+	/** a bound method's function, in a hot JS build: its method looked up as it's called, so one made before a reload runs the new code **/
+	static inline var LATE_BIND = "function $bind(o,m) { if( m == null ) return null; if( m.__id__ == null ) m.__id__ = $global.$haxeUID++; var f; "
+		+ "if( o.hx__closures__ == null ) o.hx__closures__ = {}; else f = o.hx__closures__[m.__id__]; if( f == null ) { "
+		+ "f = function() { var g = f.method; while( g.__hot_next__ != null ) g = f.method = g.__hot_next__; return g.apply(o,arguments); }; "
+		+ "f.method = m; o.hx__closures__[m.__id__] = f; } return f; }";
+
+	/**
+		A bound method (`addEventListener(CLICK, onClick)`) is Haxe's `$bind`, which binds the
+		method as it is (`m.bind(o)`): one made before a reload would run the old code. The
+		output's `$bind` is replaced by one that follows the method to its newest code
+		(`__hot_next__`, which a swap sets: JsSwap), on its one line, so no line moves for the
+		source map. A bundle with no bound method has no `$bind`
+	**/
+	static function lateBind(output:String) {
+		if (!FileSystem.exists(output))
+			return;
+		var text = sys.io.File.getContent(output);
+		var start = text.indexOf("\nfunction $bind(o,m) {");
+		if (start < 0)
+			return;
+		var end = text.indexOf("\n", start + 1);
+		if (end < 0)
+			end = text.length;
+		if (text.substring(start + 1, end) != LATE_BIND)
+			sys.io.File.saveContent(output, text.substring(0, start + 1) + LATE_BIND + text.substring(end));
 	}
 
 	/**

@@ -32,8 +32,10 @@ import js.Syntax;
 	   the first reload, calls through them: a copied method would stay the second
 	   bundle's. So old code still around (a callback, an object nothing walked to) runs
 	   the new code, on the same state.
-	   What it can't reach: a closure, or a bound method, made before the reload runs
-	   the code it came from;
+	   A bound method made before the reload (`addEventListener(CLICK, onClick)`) runs the
+	   new code too: a hot build's `$bind` looks its method up as it's called, and each
+	   old method leads to its new one. What it can't reach: a closure made before the
+	   reload runs the code it came from;
 	5. the new code's `@:afterHotReload` hooks, and the main class's `afterReload`.
 
 	hotreload's own classes are left out: each bundle keeps its own.
@@ -207,6 +209,12 @@ class JsSwap {
 						if (key != "constructor" && Syntax.code("typeof {0}[{1}] == 'function'", n.prototype, key))
 							functions.set(Reflect.field(o.prototype, key), Reflect.field(n.prototype, key));
 			}
+
+		// a bound method made before the reload (a hot build's `$bind`: Builder.lateBind)
+		// follows each old method to the new one; and the new one takes the old one's id, so
+		// binding it again finds the same function: removeEventListener(CLICK, onClick)
+		// removes the listener added before the reload
+		Syntax.code("for (const [o, n] of {0}) { o.__hot_next__ = n; if (o.__id__ != null && n.__id__ == null) n.__id__ = o.__id__; }", functions);
 
 		// the statics' values, and what they hold
 		var walker = new Walker(protos, classes, functions, old.enums, neu.enums);

@@ -121,9 +121,10 @@ it.
 Models.load("ship.obj", file -> loaded(file));    // reaches the newest `loaded`, on both targets
 ```
 
-Don't pass a method as a value (`Models.load("ship.obj", loaded)`). That's a bound method,
-or a static's closure, which no reload can re-point, so it runs its old code on both
-targets; the build warns about one, in your code and in the main class. A callback
+Don't pass a method as a value (`Models.load("ship.obj", loaded)`). Natively that's a bound
+method, or a static's closure, which no reload can re-point, so it runs its old code; the
+build warns about one, in your code and in the main class. (On JS a bound method follows
+its method to the new code: see [JS limits](#js-limits).) A callback
 registered once for the program's life (for input, say) can be made again in an
 `@:afterHotReload` hook instead.
 
@@ -525,8 +526,12 @@ map, so a breakpoint also hits in the new code after a reload.
 
 ### JS limits
 
-- A closure made before a reload keeps its own code, though what it calls by name is new. A
-  method passed as a value (`load(path, place)`) keeps its old code; the build warns about one.
+- A closure made before a reload keeps its own code, though what it calls by name is new.
+- A bound method passed as a value (`addEventListener(CLICK, onClick)`) runs the new code
+  after a reload, and the new code's `onClick` is the same function, so
+  `removeEventListener(CLICK, onClick)` removes the listener added before it. A static
+  function passed as a value keeps its old code unless a static holds it. The build warns
+  about both, since natively both keep their old code.
 - A renamed or removed field is `undefined` on carried objects, as is a new field with no
   initializer.
 
@@ -546,6 +551,7 @@ both.
 | A carried object                                   | copied to the new class                   | the same object, given the new class  |
 | An object held only from outside the `@:hot` statics | keeps its old code                      | runs the new code                     |
 | A closure made before a reload                     | its own code; the new through `@:hot` functions | its own code; the new for what it calls |
+| A bound method passed as a value (`onClick`)       | its old code                              | the new code                          |
 | A new field with no initializer                    | its type's default (0, false, null)       | `undefined`                           |
 | Reloaded code's speed                              | cppia: 5–56× slower than native           | full speed                            |
 | Breakpoints in reloaded code                       | need the forks; interpreted only          | DevTools, as usual                    |
