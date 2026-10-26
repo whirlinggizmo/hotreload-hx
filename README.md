@@ -82,7 +82,10 @@ after its macros, and it stops with the compiler however that ends:
 `mounts` serves directories besides the build's output, such as assets; the sources it
 watches are the build's own class paths (`-cp`), not its libraries', even in a local
 repository (`haxelib newrepo`'s `.haxelib/`) inside the project (`hotreload: watch:
-excluding` names those). With `background: true`, `serve` returns
+excluding` names those). `watch` names more directories to watch, without making them the
+project's: a library's checkout you edit while the program runs, say
+(`watch: ["../helix/src"]`), whose statics are then kept as a library's are. With
+`background: true`, `serve` returns
 once the server is serving and leaves it running, detached from the terminal, its messages
 in `.hotreload-<port>.log` (or `log`), until it's stopped:
 
@@ -121,6 +124,8 @@ Options:
 
 - `--port <n>`: where it serves, 8080 by default.
 - `--mount /assets=../assets`: serves another directory too, with Range requests.
+- `--watch ../lib/src`: watches another directory's sources too, without making them the
+  project's.
 - `--reload-define <name[=value]>`: a define for reload builds only, for something the first
   build makes and reloads don't need (a wasm engine the page loads, say).
 - `--no-compilation-server`: builds each reload with a `haxe` of its own.

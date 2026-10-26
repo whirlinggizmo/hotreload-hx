@@ -22,6 +22,8 @@ it runs, and its builds. It checks the rules for statics:
   directory, isn't the project's: its code isn't warned about, nor its directory watched;
 - the DevServer builds from its hxml as it is now: a class path added to an hxml the
   build names (or one it names) while it runs is built with, and watched;
+- the DevServer told to watch a directory outside the project (--watch), a library's,
+  says so, and an edit there is built;
 - on JS, a listener added as a bound method before a reload (addEventListener(CLICK,
   onClick)) runs the new code after it, and the new code can remove it;
 - built through a compilation server, from its cache, into an output directory that isn't
@@ -234,6 +236,33 @@ def dev_relist():
         server.stop()
 
 
+def dev_watch():
+    """a copy of watch/: the DevServer building app/, which uses ../lib, a library outside
+    it, told to watch it too (--watch ../lib): whether it said so, and an edit to the
+    library was built"""
+    print("\n== a library's directory watched too, not the project's")
+    work = os.path.join(HERE, "out", "watch")
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(HERE, "watch"), work)
+    app = os.path.join(work, "app")
+    lib = os.path.join(work, "lib")
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = Program(app, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "--watch", "../lib",
+                           "build.hxml"], os.path.join(LOGS, "dev-watch.log"))
+    try:
+        if not server.wait(r"hotreload: ready", timeout=120):
+            return False
+        if "hotreload: watch: including src/, ../lib/" not in open(server.log).read():
+            print("    !! ../lib/ isn't said to be watched")
+            return False
+        edit(os.path.join(lib, "Lib.hx"), '"v1"', '"v2"')
+        return (server.wait(r"hotreload: build: (done|failed)", timeout=60) or "").startswith("hotreload: build: done")
+    finally:
+        server.stop()
+
+
 def dev_bind():
     """a copy of bind/ served and run in node, a listener added as a bound method before a
     reload (OpenFL's addEventListener(CLICK, onClick)): whether after each of two reloads it
@@ -338,6 +367,9 @@ def check(name, result):
     if "dev_bind" in result and result["dev_bind"] != DEV_BIND:
         print(f"  FAILED {name}, a bound method across reloads: {result['dev_bind']!r}, expected {DEV_BIND!r}")
         failures += 1
+    if result.get("dev_watch") is False:
+        print(f"  FAILED {name}: the DevServer didn't watch and build a directory it was told to watch")
+        failures += 1
     if result.get("dev_output") is False:
         print(f"  FAILED {name}: the DevServer's build warnings didn't come before it served")
         failures += 1
@@ -358,6 +390,7 @@ if __name__ == "__main__":
     result["local_repo"] = local_repo()
     result["dev_output"] = dev_output()
     result["dev_relist"] = dev_relist()
+    result["dev_watch"] = dev_watch()
     result["dev_bind"] = dev_bind()
     result["server"] = server()
     print("\n== results")

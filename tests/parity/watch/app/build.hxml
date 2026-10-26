@@ -1,0 +1,5 @@
+# the watch test: a project using a library outside it (../lib), which run.py's DevServer is told to watch (--watch ../lib)
+-cp src
+-cp ../lib
+--main Main
+--js out/main.js

@@ -33,6 +33,8 @@ using StringTools;
 
 	- `--port <n>`: where it serves, 8080 by default
 	- `--mount <url>=<dir>`: serves a directory at a path too, as `--mount /assets=../assets`
+	- `--watch <dir>`: watches a directory's sources too, for a rebuild when one changes,
+	  without making them the project's (a library's checkout being edited, say)
 	- `--reload-define <name[=value]>`: a define for the reload's builds only, not the first:
 	  for something the page loads once, which the first build makes and a reload's needn't
 	  (a wasm engine the page loads, say)
@@ -82,6 +84,7 @@ code in as it runs.
 
   --port <n>                  where it serves (8080)
   --mount <url>=<dir>         a directory served at a path too: --mount /assets=assets
+  --watch <dir>               a directory whose sources are watched too, not the project's (a library being edited)
   --reload-define <name[=v]>  a define for the reload builds only, not the first
   --no-compilation-server     each build with a haxe of its own
   --sidecar <command>         a command run beside it, started once it is serving and stopped with it (an HTTPS proxy, say):
@@ -91,7 +94,7 @@ code in as it runs.
   --help                      this
 
 From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064, mounts: {\"/assets\": \"assets\"}})
-(options: port, mounts, reloadDefines, compilationServer, sidecars, background, log, restart); stopped with
+(options: port, mounts, watch, reloadDefines, compilationServer, sidecars, background, log, restart); stopped with
 --macro hotreload.DevServer.stop(8064).";
 
 	/** how often the sources are checked: a check is a directory walk, cheap at this size **/
@@ -100,6 +103,9 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	static var port = 8080;
 	static var mounts = new Map<String, String>();
 	static var reloadDefines = new Array<String>();
+
+	/** directories watched besides the project's (`--watch`): a rebuild when they change, but not the project's code **/
+	static var watched = new Array<String>();
 	static var root:String;
 
 	/** the directory it was started in: its project, which a restart (serve's) checks is the same **/
@@ -158,6 +164,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 				case "--mount":
 					var m = args[++i].split("=");
 					mounts.set("/" + m[0].replace("\\", "/").split("/").filter(s -> s != "").join("/"), FileSystem.absolutePath(m[1]));
+				case "--watch":
+					watched.push(Path.removeTrailingSlashes(Path.normalize(FileSystem.absolutePath(args[++i]))));
 				case "--no-compilation-server":
 					useServer = false;
 				case "--reload-define":
@@ -263,7 +271,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		server this project left on the port (one started in this directory) is stopped
 		first; another project's isn't, and this fails saying whose it is. `sidecars` are
 		commands run beside it, each an array of its arguments (`--sidecar`): started once
-		it's serving, and stopped with it, however it stops.
+		it's serving, and stopped with it, however it stops. `watch` names directories
+		whose sources are watched too, without being the project's (`--watch`).
 
 		With `background: true`, it returns once the server is serving (or fails as it
 		does), and the server keeps running after the compiler, detached from this terminal,
@@ -273,6 +282,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	public static function serve(build:haxe.extern.EitherType<String, Array<String>>, ?options:{
 		?port:Int,
 		?mounts:haxe.DynamicAccess<String>,
+		?watch:Array<String>,
 		?reloadDefines:Array<String>,
 		?compilationServer:Bool,
 		?background:Bool,
@@ -289,6 +299,9 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			if (options.mounts != null)
 				for (url => dir in options.mounts)
 					args = args.concat(["--mount", '$url=$dir']);
+			if (options.watch != null)
+				for (dir in options.watch)
+					args = args.concat(["--watch", dir]);
 			if (options.reloadDefines != null)
 				for (d in options.reloadDefines)
 					args = args.concat(["--reload-define", d]);
@@ -534,7 +547,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 
 	/** the directories watched, and the class paths in the project left out (its local repository's libraries) **/
 	static function sayWatch() {
-		say('hotreload: watch: including ${[for (d in config.dirs) relative(d) + "/"].join(", ")}');
+		say('hotreload: watch: including ${[for (d in config.dirs.concat(watched)) relative(d) + "/"].join(", ")}');
 		var excluded = config.excluded == null ? [] : config.excluded;
 		if (excluded.length > 0)
 			say('hotreload: watch: excluding ${[for (d in excluded) relative(d) + "/"].join(", ")} (libraries in the project\'s .haxelib/)');
@@ -595,7 +608,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		File.saveContent(config.js, 'globalThis.__hotreload_built = $n; ' + js);
 	}
 
-	/** the .hx files in the watched directories and below **/
+	/** the .hx files in the watched directories (the project's, and `--watch`'s) and below **/
 	static function sources():Map<String, String> {
 		var result = new Map<String, String>();
 		function walk(dir:String) {
@@ -607,7 +620,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 					result.set(path, path);
 			}
 		}
-		for (d in config.dirs)
+		for (d in config.dirs.concat(watched))
 			walk(d);
 		for (f in hxmlFiles())
 			result.set(f, f);
@@ -977,8 +990,19 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		}
 	}
 
+	/** a path from the build's directory, for messages: `../lib/Lib.hx` for one beside it; as it is on another drive **/
 	static function relative(path:String):String {
-		return path.startsWith(config.cwd) ? path.substr(config.cwd.length) : path;
+		if (path.startsWith(config.cwd))
+			return path.substr(config.cwd.length);
+		var split = ~/[\/\\]/g;
+		var from = split.split(config.cwd).filter(s -> s != "");
+		var to = split.split(path).filter(s -> s != "");
+		var i = 0;
+		while (i < from.length && i < to.length && from[i] == to[i])
+			i++;
+		if (i == 0)
+			return path;
+		return [for (_ in i...from.length) ".."].concat(to.slice(i)).join("/");
 	}
 }
 #end
