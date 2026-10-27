@@ -1,4 +1,7 @@
-/** a method passed as a value, which a reload can't re-point: warned about; a lambda calling it, not **/
+/**
+	@:hot, deprecated: warned about. Methods passed as values, an object's and a static one,
+	and lambdas calling them: nothing to say (a reload re-points them all)
+**/
 class Warn {
 	@:hot static var pending:Array<Int->Void> = [];
 

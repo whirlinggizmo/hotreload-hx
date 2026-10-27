@@ -12,7 +12,7 @@ it runs, and its builds. It checks the rules for statics:
 - the main class's statics are kept;
 - a completion made in the reloaded code before a reload (a lambda calling a function by
   name), held by the main class, reaches the new code after it;
-- a method of your code passed as a value is warned about, and so is @:hot, deprecated;
+- @:hot, deprecated, is warned about; a method passed as a value is not;
 - a class whose statics have no type written builds before the classes it uses, as
   without hotreload: another class's build macro that needs its own to have run first
   isn't run early;
@@ -25,8 +25,9 @@ it runs, and its builds. It checks the rules for statics:
   build names (or one it names) while it runs is built with, and watched;
 - the DevServer told to watch a directory outside the project (--watch), a library's,
   says so, and an edit there is built;
-- on JS, a listener added as a bound method before a reload (addEventListener(CLICK,
-  onClick)) runs the new code after it, and the new code can remove it;
+- a listener added before a reload as a bound method (addEventListener(CLICK, onClick))
+  or a static function, where the reload's walk doesn't reach it, runs the new code after
+  it, and the new code can remove it;
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
@@ -38,7 +39,7 @@ import json, os, shutil, socket, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "matrix"))
-from drive import Program, edit, install
+from drive import Program, edit, install, save
 
 LOGS = os.path.join(HERE, "logs")
 OUTSIDE = os.path.join(HERE, "src", "Outside.hx")
@@ -154,7 +155,7 @@ def local_repo():
     """localrepo/ built as a project with its own repository (.haxelib/, as haxelib newrepo
     makes it), hotreload-hx in it as haxelib dev puts it, and localrepo/lib/ installed in it
     as locallib: what's wrong, if anything (the library's directory among the project's,
-    its method passed as a value warned about, or the build failing)"""
+    a hotreload warning, or the build failing)"""
     print("\n== a library in the project's own repository")
     work = os.path.join(HERE, "out", "localrepo")
     shutil.rmtree(work, ignore_errors=True)
@@ -174,7 +175,7 @@ def local_repo():
     if r.returncode != 0:
         wrong = [l.strip() for l in r.stderr.splitlines() if "Warning" not in l]
     else:
-        wrong = [l.strip() for l in r.stderr.splitlines() if "passed as a value" in l]
+        wrong = [l.strip() for l in r.stderr.splitlines() if "hotreload:" in l]
         dirs = json.load(open(config))["dirs"]
         print("    | the project's directories: " + ", ".join(os.path.relpath(d, work) for d in dirs))
         wrong += [f"{d} is among the project's directories" for d in dirs if ".haxelib" in d]
@@ -201,7 +202,7 @@ def dev_output():
             lines = server.lines()
             for l in lines:
                 print("    | " + l)
-                if "passed as a value" in l:
+                if "@:hot is deprecated" in l:
                     warned = True
             if any("hotreload: ready" in l for l in lines):
                 return warned
@@ -267,9 +268,9 @@ def dev_watch():
 
 
 def dev_bind():
-    """a copy of bind/ served and run in node, a listener added as a bound method before a
-    reload (OpenFL's addEventListener(CLICK, onClick)): whether after each of two reloads it
-    runs the new code, and the new code removes it. Its lines, or None"""
+    """a copy of bind/ served and run in node, listeners added before a reload as a bound
+    method (OpenFL's addEventListener(CLICK, onClick)) and a static function: whether after
+    each of two reloads they run the new code, and the new code removes them. Its lines, or None"""
     print("\n== a bound method passed as a value, across a reload (JS)")
     work = os.path.join(HERE, "out", "bind")
     shutil.rmtree(work, ignore_errors=True)
@@ -289,11 +290,14 @@ def dev_bind():
             return None
         # two reloads: the second's listener was added by the first reload's code
         for v in ["v2", "v3"]:
-            edit(os.path.join(work, "src", "Button.hx"), '"click ' + {"v2": "v1", "v3": "v2"}[v] + '"', f'"click {v}"')
+            was = {"v2": "v1", "v3": "v2"}[v]
+            button = os.path.join(work, "src", "Button.hx")
+            text = open(button).read()
+            save(button, text.replace(f'"click {was}"', f'"click {v}"').replace(f'"tick {was}"', f'"tick {v}"'))
             if not p.wait(r"^removed=", timeout=60):
                 return None
         # (lines can come together in one read: taken from the log)
-        return [l for l in open(p.log).read().splitlines() if l.startswith(("click v", "removed="))]
+        return [l for l in open(p.log).read().splitlines() if l.startswith(("click v", "tick v", "removed="))]
     finally:
         if p:
             p.stop()
@@ -334,15 +338,13 @@ def server():
 
 
 WARNINGS = sorted([
-    "warn/Main.hx:12: characters 14-24 : Warning : hotreload: later passed as a value keeps its old code after a reload; call it from a lambda, x -> later(x)",
-    "warn/Warn.hx:14: characters 8-15 : Warning : hotreload: place passed as a value keeps its old code after a reload; call it from a lambda, x -> place(x)",
-    "warn/Warn.hx:15: characters 8-16 : Warning : hotreload: placeAll passed as a value keeps its old code after a reload; call it from a lambda, x -> placeAll(x)",
-    "warn/Warn.hx:3: characters 2-7 : Warning : hotreload: @:hot is deprecated: every static is kept now. Remove it, or use @:resetOnHotReload to reset a static on every reload.",
+    "warn/Warn.hx:6: characters 2-7 : Warning : hotreload: @:hot is deprecated: every static is kept now. Remove it, or use @:resetOnHotReload to reset a static on every reload.",
 ])
 
 
 # the listener's lines: before the reloads, then after each one, the new code's, and removed by it
-DEV_BIND = ["click v1", "click v2", "removed=true listeners=0", "click v3", "removed=true listeners=0"]
+DEV_BIND = ["click v1", "tick v1", "click v2", "tick v2", "removed=true listeners=0",
+            "click v3", "tick v3", "removed=true listeners=0"]
 
 
 def check(name, result):

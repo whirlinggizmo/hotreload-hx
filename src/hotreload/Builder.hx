@@ -31,14 +31,14 @@ private enum Mode {
 	class's statics' types and first values, as written (`__hot_statics__`), a guard that
 	keeps a reloaded bundle's `main` from running again, each class's field initializers,
 	for the objects a reload carries over (their new fields start from them), the reload
-	hooks, a `$bind` that follows a bound method to its new code, and, for the DevServer,
-	how to build it again.
+	hooks, a `$bind` that follows a bound method to its new code, the same for a static
+	function passed as a value, and, for the DevServer, how to build it again.
 **/
 class Builder {
 	#if macro
 	static var mode = Off;
 	static var mainClass:String;
-	/** the project's own class paths: its code, watched, and warned about **/
+	/** the project's own class paths: its code, watched **/
 	static var projectDirs:Array<String> = [];
 
 	/** the class paths inside the project's directory left out of it: its local repository's libraries **/
@@ -60,6 +60,7 @@ class Builder {
 		projectDirs = [];
 		mainFile = null;
 		configured = false;
+		staticValues = null;
 		std = null;
 		own = null;
 		if (!Context.defined("hotreload"))
@@ -110,9 +111,12 @@ class Builder {
 		findProject(args, cwd);
 		var path = Context.defined("hotreload_config") ? Context.definedValue("hotreload_config") : absolute(cwd, js) + ".hotreload.json";
 		var output = absolute(cwd, js);
-		Context.onAfterGenerate(() -> lateBind(output));
+		Context.onAfterGenerate(() -> {
+			lateBind(output);
+			lateStatics(output);
+		});
 		Context.onAfterTyping(types -> {
-			warnMethodValues(types);
+			findStaticValues(types);
 			if (configured)
 				return;
 			configured = true;
@@ -163,10 +167,44 @@ class Builder {
 	}
 
 	/**
+		A static function passed as a value (`addEventListener("keydown", Game.onKey)`) is
+		the function itself: one passed before a reload would run the old code, and the new
+		code's `Game.onKey` is another function, which removes nothing. Each one found
+		(findStaticValues) is made a function that calls it (`__hot_impl__`), on its class's
+		closing line, so no line moves for the source map; a swap keeps that function, and
+		points it to the new code (JsSwap). One whose class isn't in the output as Haxe
+		writes it is told
+	**/
+	static function lateStatics(output:String) {
+		if (staticValues == null || !staticValues.keys().hasNext() || !FileSystem.exists(output))
+			return;
+		var text = sys.io.File.getContent(output);
+		var changed = false;
+		for (name => entry in staticValues) {
+			var start = text.indexOf('\nclass $name ');
+			var end = start < 0 ? -1 : text.indexOf("\n}", start + 1);
+			var names = [for (n in entry.names.keys()) n];
+			names.sort(Reflect.compare);
+			if (end < 0) {
+				for (n in names)
+					Context.warning('hotreload: ${entry.cls}.$n passed as a value keeps its old code after a reload ($name not found in the output); call it from a lambda, x -> $n(x)', entry.names.get(n));
+				continue;
+			}
+			end += 2;
+			var line = ' for (const k of ${haxe.Json.stringify(names)}) { const f = $name[k], w = function() { return w.__hot_impl__.apply(this,arguments); }; w.__hot_impl__ = f; $name[k] = w; }';
+			if (text.substr(end, line.length) == line)
+				continue;
+			text = text.substring(0, end) + line + text.substring(end);
+			changed = true;
+		}
+		if (changed)
+			sys.io.File.saveContent(output, text);
+	}
+
+	/**
 		The project: its own class paths (inside its directory; not the standard library's
 		or a haxelib's, a local repository's, `.haxelib/`, inside it too), or else the main
-		class's directory, and the main class's file. Its classes' plain statics start over on
-		a reload; its sources are watched
+		class's directory, and the main class's file. Its sources are watched
 	**/
 	static function findProject(args:Array<String>, cwd:String) {
 		mainFile = try Path.normalize(FileSystem.absolutePath(Context.resolvePath(mainClass.replace(".", "/") + ".hx"))) catch (_) null;
@@ -188,62 +226,80 @@ class Builder {
 		excludedDirs = excluded;
 	}
 
-	/** whether a class is the project's own code, but the main class: one the build warns about **/
-	static function isProject(c:ClassType):Bool {
-		if (c.isExtern || c.isInterface || c.kind.match(KAbstractImpl(_)))
-			return false;
-		var file = fileOf(c.pos);
-		return file != null && file != mainFile && inside(file, projectDirs) && !file.startsWith(stdDir()) && !file.startsWith(ownDir());
-	}
+	/**
+		The static functions passed as values (`addEventListener("keydown", Game.onKey)`),
+		by their classes' JS names: each one's position, for when its class isn't found in
+		the output. Found by findStaticValues, made late-bound by lateStatics
+	**/
+	static var staticValues:Map<String, {cls:String, names:Map<String, Position>}>;
 
 	/**
-		A method of your code passed as a value, `load(path, place)`: a static's closure
-		that nothing a static holds leads to runs its old code after a reload. A lambda that
-		calls the method by name, `x -> place(x)`, reaches the new code. Told, at each use,
-		in every hot build, in your code and in the main class
+		The static functions the code passes as values, anywhere but in the standard
+		library and this one: they're made late-bound (lateStatics). A method of an object
+		passed as a value is Haxe's `$bind`, made late-bound by lateBind
 	**/
-	static function warnMethodValues(types:Array<ModuleType>) {
+	static function findStaticValues(types:Array<ModuleType>) {
+		staticValues = [];
 		for (t in types)
 			switch (t) {
-				// (the main class's too: `reloader.assetsChanged = Game.assetsChanged` is as stuck)
-				case TClassDecl(_.get() => c) if (isProject(c) || fullName(c.pack, c.name) == mainClass):
+				case TClassDecl(_.get() => c) if (!c.isExtern && !isLibraryOwn(c)):
 					var fields = c.statics.get().concat(c.fields.get());
 					if (c.constructor != null)
 						fields.push(c.constructor.get());
 					for (f in fields) {
-						// this macro's own: a hook handed to the reloader
-						if (f.name.startsWith("__hot_"))
-							continue;
 						var e = f.expr();
 						if (e != null)
-							methodValues(e, false);
+							valuesIn(e, false);
 					}
 				default:
 			}
 	}
 
-	static function methodValues(e:TypedExpr, called:Bool) {
+	static function valuesIn(e:TypedExpr, called:Bool) {
 		switch (e.expr) {
 			case TCall(callee, args):
-				methodValues(callee, true);
+				valuesIn(callee, true);
 				for (a in args)
-					methodValues(a, false);
+					valuesIn(a, false);
 			case TParenthesis(x) | TMeta(_, x):
-				methodValues(x, called);
-			case TField(sub, access):
-				if (!called) {
-					var method = switch (access) {
-						case FStatic(c, cf) | FInstance(c, _, cf) | FClosure({c: c}, cf) if (isProject(c.get())): cf.get();
-						default: null;
-					}
-					if (method != null && method.kind.match(FMethod(MethNormal)))
-						Context.warning('hotreload: ${method.name} passed as a value keeps its old code after a reload; call it from a lambda, x -> ${method.name}(x)', e.pos);
-				}
-				methodValues(sub, false);
+				valuesIn(x, called);
+			case TField(sub, FStatic(_.get() => c, _.get() => cf)) if (!called && cf.kind.match(FMethod(MethNormal)) && !c.isExtern && !isLibraryOwn(c)):
+				var name = jsName(c);
+				var entry = staticValues.get(name);
+				if (entry == null)
+					staticValues.set(name, entry = {cls: fullName(c.pack, c.name), names: []});
+				if (!entry.names.exists(cf.name))
+					entry.names.set(cf.name, e.pos);
+				valuesIn(sub, false);
 			default:
-				e.iter(x -> methodValues(x, false));
+				e.iter(x -> valuesIn(x, false));
 		}
 	}
+
+	/** a class of the standard library's or this one's: never reloaded **/
+	static function isLibraryOwn(c:ClassType):Bool {
+		var file = fileOf(c.pos);
+		return file == null || file.startsWith(stdDir()) || file.startsWith(ownDir());
+	}
+
+	/** a class's name in the JS output (Haxe's genjs: its flat path, an abstract's implementation by the abstract's) **/
+	static function jsName(c:ClassType):String {
+		var native = c.meta.extract(":native");
+		if (native.length > 0 && native[0].params.length > 0)
+			switch (native[0].params[0].expr) {
+				case EConst(CString(s)):
+					return flatPath(s.split("."));
+				default:
+			}
+		var path = switch (c.kind) {
+			case KAbstractImpl(_.get() => a): a.pack.concat([a.name]);
+			default: c.pack.concat([c.name]);
+		}
+		return flatPath(path);
+	}
+
+	static function flatPath(path:Array<String>):String
+		return [for (part in path) part.split("_").join("_$")].join("_");
 
 	/** `@:build` on every class of a hot build: its statics' types and first values, the reload hooks, and what a carried object needs **/
 	public static function build():Array<Field> {
@@ -448,10 +504,6 @@ class Builder {
 
 	static function absolute(cwd:String, path:String):String {
 		return Path.isAbsolute(path) ? path : Path.join([cwd, path]);
-	}
-
-	static function inside(file:String, dirs:Array<String>):Bool {
-		return file != null && dirs.exists(d -> file.startsWith(d + "/"));
 	}
 	#end
 }

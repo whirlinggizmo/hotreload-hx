@@ -32,8 +32,10 @@ import js.Syntax;
 	   the new code, on the same state.
 	   A bound method made before the reload (`addEventListener(CLICK, onClick)`) runs the
 	   new code too: a hot build's `$bind` looks its method up as it's called, and each
-	   old method leads to its new one. What it can't reach: a closure made before the
-	   reload runs the code it came from;
+	   old method leads to its new one. So does a static function passed as a value
+	   (`addEventListener("keydown", Game.onKey)`): the build makes each one a function
+	   that calls it, which a swap keeps, as the new class's, and points to the new code.
+	   What it can't reach: a closure made before the reload runs the code it came from;
 	5. the new code's `@:afterHotReload` hooks, and the main class's `afterReload`.
 
 	hotreload's own classes are left out: each bundle keeps its own.
@@ -193,8 +195,17 @@ class JsSwap {
 				if (o.prototype != null && n.prototype != null)
 					protos.set(o.prototype, n.prototype);
 				for (key in methods(o))
-					if (Syntax.code("typeof {0}[{1}] == 'function'", n, key))
-						functions.set(Reflect.field(o, key), Reflect.field(n, key));
+					if (Syntax.code("typeof {0}[{1}] == 'function'", n, key)) {
+						var was:Dynamic = Reflect.field(o, key);
+						if (was.__hot_impl__ != null) {
+							// a static function passed as a value (Builder.lateStatics): the same
+							// function, the new code's, so the new code can remove it
+							var now:Dynamic = Reflect.field(n, key);
+							was.__hot_impl__ = now.__hot_impl__ != null ? now.__hot_impl__ : now;
+							Syntax.code("Object.defineProperty({0}, {1}, {value: {2}, writable: true, configurable: true})", n, key, was);
+						} else
+							functions.set(was, Reflect.field(n, key));
+					}
 				if (o.prototype != null && n.prototype != null)
 					for (key in methods(o.prototype))
 						if (key != "constructor" && Syntax.code("typeof {0}[{1}] == 'function'", n.prototype, key))

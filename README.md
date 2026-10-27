@@ -234,20 +234,18 @@ hotreload walks arrays, maps, anonymous structures, classes' objects and enum va
 
 ### Callbacks
 
-Every call by name reaches the new code, from any code, however old. A closure made before
-a reload keeps its own body, but what it calls is new, so a callback that may outlive a
-reload, a load's completion, say, is best a lambda that calls a function by name:
+Every call by name reaches the new code, from any code, however old. A method passed as a
+value runs the new code too, whether it is an object's (`addEventListener(CLICK, onClick)`)
+or a static function (`addEventListener("keydown", Game.onKey)`). The new code's `onClick`
+or `Game.onKey` is the same function, so `removeEventListener` removes the listener added
+before the reload.
+
+A closure (a lambda, a local function) made before a reload keeps its own body, but what
+it calls is new:
 
 ```haxe
 Models.load("ship.obj", file -> loaded(file)); // reaches the newest `loaded`
 ```
-
-A bound method passed as a value (`addEventListener(CLICK, onClick)`) runs the new code
-too, and the new code's `onClick` is the same function, so
-`removeEventListener(CLICK, onClick)` removes the listener added before the reload. A
-static function passed as a value (`Models.load("ship.obj", loaded)`) keeps its old code
-unless a static holds it. The build warns about a method passed as a value, in your code
-and in the main class.
 
 ### Reload hooks
 
@@ -314,7 +312,6 @@ breakpoint also hits in the new code after a reload.
 ## Limits
 
 - A closure made before a reload keeps its own body.
-- A static function passed as a value keeps its old code unless a static holds it.
 - Code that already ran isn't run again: a listener a new version of `init()` would add
   isn't added until `init()` runs. Use an `@:afterHotReload` hook for that.
 - A renamed or removed field is `undefined` on carried objects, as is a new field with no

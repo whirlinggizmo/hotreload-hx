@@ -1,6 +1,6 @@
 /**
 	a library in the project's own repository (.haxelib/, haxelib newrepo): not the project's code,
-	so its method passed as a value isn't warned about, and its directory isn't watched
+	so its directory isn't watched. Its static function passed as a value is late-bound, as the project's
 **/
 class Lib {
 	public static function start() {
