@@ -8,7 +8,6 @@ Release builds compile the same code with no reloading and no cost.
 
 Native reload (hxcpp, through cppia) is on the [`hxcpp`](https://github.com/whirlinggizmo/hotreload-hx/tree/hxcpp)
 branch. That branch holds the version that reloaded both targets under the same rules.
-hotreload-hx is the Haxe side of [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim).
 
 ## Install
 
