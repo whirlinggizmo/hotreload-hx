@@ -344,7 +344,9 @@ class Builder {
 		var result = [];
 		var extra = [];
 		var statics = [];
+		var code = new CodeInfo();
 		for (field in fields) {
+			code.add(field, isMain(cls));
 			var hook = field.meta.find(m -> m.name == ":beforeHotReload" || m.name == ":afterHotReload");
 			var reset = field.meta.exists(m -> m.name == ":resetOnHotReload");
 			if (hook != null || reset)
@@ -401,6 +403,11 @@ class Builder {
 			changed = true;
 		}
 		if (!cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
+			var info = code.expr(cls.pos);
+			if (info != null && !file.startsWith(ownDir())) {
+				extra.push(staticVar("__hot_code__", macro:Dynamic, info, cls.pos));
+				changed = true;
+			}
 			var init = jsFieldInitializer(className, fields);
 			if (init != null) {
 				extra.push(init);
@@ -446,7 +453,7 @@ class Builder {
 		whether a var or property holds a value: a var, or a property with `default` or `null`
 		on either side, or `@:isVar`; not `(get, never)` or `(get, set)`, which are their accessors
 	**/
-	static function hasStorage(field:Field):Bool {
+	public static function hasStorage(field:Field):Bool {
 		return switch (field.kind) {
 			case FVar(_, _): true;
 			case FProp(get, set, _, _):
@@ -507,6 +514,99 @@ class Builder {
 	}
 	#end
 }
+
+#if macro
+/**
+	Represents a class's code as written, for a reload to compare (`JsSwap.compareCode`).
+
+	Holds hashes of the main function, the constructor, each instance field's initializer and
+	each method's closures. The hash of a closure, a main or a constructor leaves out the
+	closures inside it. An edit is therefore reported once, at the closure where it was made.
+**/
+private class CodeInfo {
+	var main:String;
+	var ctor:String;
+	var fields:Array<ObjectField> = [];
+	var closures:Array<ObjectField> = [];
+
+	public function new() {}
+
+	/**
+		Records a field's code.
+
+		@param field  The field, before the build changes it.
+		@param mainClass  True when the field's class is the main class.
+	**/
+	public function add(field:Field, mainClass:Bool) {
+		var isStatic = field.access.contains(AStatic);
+		switch (field.kind) {
+			case FFun(f) if (f.expr != null):
+				if (field.name == "new")
+					ctor = hash(f.expr);
+				else if (field.name == "main" && isStatic && mainClass)
+					main = hash(f.expr);
+				var found = [];
+				closuresIn(f.expr, found);
+				if (found.length > 0)
+					closures.push({field: field.name, expr: macro $a{found}});
+			case FVar(_, e) | FProp(_, _, _, e) if (!isStatic && Builder.hasStorage(field)):
+				fields.push({field: field.name, expr: macro $v{e == null ? "" : hash(e)}});
+			default:
+		}
+	}
+
+	/**
+		Returns the class's `__hot_code__` value.
+
+		@param pos  The class's position.
+		@return  The value, or null when the class has nothing to compare.
+	**/
+	public function expr(pos:Position):Expr {
+		if (main == null && ctor == null && fields.length == 0 && closures.length == 0)
+			return null;
+		var info:Array<ObjectField> = [];
+		if (main != null)
+			info.push({field: "main", expr: macro $v{main}});
+		if (ctor != null)
+			info.push({field: "ctor", expr: macro $v{ctor}});
+		info.push({field: "fields", expr: {expr: EObjectDecl(fields), pos: pos}});
+		info.push({field: "closures", expr: {expr: EObjectDecl(closures), pos: pos}});
+		return {expr: EObjectDecl(info), pos: pos};
+	}
+
+	/** Adds each closure in an expression, with its hash and its position, to a list. **/
+	static function closuresIn(e:Expr, found:Array<Expr>) {
+		switch (e.expr) {
+			case EFunction(kind, f) if (f.expr != null):
+				var whole = {expr: EFunction(kind, {args: f.args, ret: f.ret, params: f.params, expr: f.expr}), pos: e.pos};
+				var loc = haxe.macro.PositionTools.toLocation(e.pos);
+				found.push(macro {hash: $v{hash(whole, true)}, at: $v{loc.file.toString() + ":" + loc.range.start.line}});
+				closuresIn(f.expr, found);
+			default:
+				e.iter(x -> closuresIn(x, found));
+		}
+	}
+
+	/**
+		Returns an expression's hash, as written, with the closures inside it left out.
+
+		@param e  The expression.
+		@param self  Optional. True when `e` is the closure being hashed, whose own body is kept.
+	**/
+	static function hash(e:Expr, self = false):String {
+		function strip(x:Expr):Expr
+			return switch (x.expr) {
+				case EFunction(_, _): macro __closure__;
+				default: x.map(strip);
+			}
+		var stripped = switch (e.expr) {
+			case EFunction(kind, f) if (self): {expr: EFunction(kind, {args: f.args, ret: f.ret, params: f.params, expr: strip(f.expr)}), pos: e.pos};
+			default: strip(e);
+		}
+		return haxe.crypto.Md5.encode(stripped.toString());
+	}
+}
+#end
 
 /** how a JS hot build was made, for the DevServer to build it again **/
 typedef JsConfig = {

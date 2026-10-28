@@ -239,7 +239,7 @@ new code's `Sad`, with constructors added or moved before it. A value with argum
 matches another `case`, and the reload says so:
 
 ```
-hotreload: enum: game.Mood.Angry moved (index 2 to 3; a value of it the reload does not reach, such as one a closure holds, matches another case)
+hotreload: enum: game.Mood.Angry moved (index 2 to 3, unreached values match another case)
 ```
 
 ### Callbacks
@@ -322,14 +322,27 @@ breakpoint also hits in the new code after a reload.
 
 ## Limits
 
-- A closure made before a reload keeps its own body.
-- An enum value with arguments that the reload doesn't reach (one a closure holds) keeps
-  its constructor's old index: when constructors are added or moved before it, it matches
-  another `case`.
-- Code that already ran isn't run again: a listener a new version of `init()` would add
-  isn't added until `init()` runs. Use an `@:afterHotReload` hook for that.
+A reload reports each saved edit that it cannot bring in:
+
+```
+hotreload: main: Main.main changed (not run again); use an @:afterHotReload hook
+hotreload: constructor: game.Enemy changed (existing objects not constructed again)
+hotreload: field: game.Enemy.shield initializer changed (existing objects keep their values)
+hotreload: field: game.Enemy.hp removed, game.Enemy.health added (values not moved)
+hotreload: closure: src/Game.hx:30 changed (in Game.makeCallback, ones made before the reload run the old body)
+hotreload: enum: game.Mood.Angry moved (index 2 to 3, unreached values match another case)
+```
+
+- A closure made before a reload keeps its own body. A reload cannot tell whether such a
+  closure is still alive, so every edited closure is reported.
+- Code that already ran is not run again. A changed `main` or constructor is reported.
+  Other code that ran once, such as a function that ran when a level loaded, cannot be told
+  apart from code that runs every frame, and is not reported. An `@:afterHotReload` hook
+  runs code on each reload.
 - A renamed or removed field is `undefined` on carried objects, as is a new field with no
   initializer. A new field's initializer runs only on objects the reload walks to.
+- An enum value with arguments that the reload does not reach keeps its constructor's old
+  index. When constructors are added or moved before it, it matches another `case`.
 
 ## Reference
 

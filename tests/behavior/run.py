@@ -31,6 +31,8 @@ it runs, and its builds. It checks the rules for statics:
 - an enum constant with no arguments is the same object across a reload, its index the new
   code's: one a closure holds still matches its case and equals the new code's constant,
   with constructors put before it; a moved constructor with arguments is said;
+- an edit a reload cannot bring in is said: main, a closure, a constructor, a field
+  initializer and a renamed field;
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
@@ -307,39 +309,72 @@ def dev_bind():
         server.stop()
 
 
-def dev_enums():
-    """a copy of enums/ served and run in node, edited once: a constructor put before the
-    others, and a static's first value edited to an enum constant. Whether enum values a
-    closure holds (which the reload doesn't walk to) still match their cases and compare
-    equal to the new code's constants, as do the walked and the new ones. Its lines, or None"""
-    print("\n== enum values across a reload that reorders their constructors (JS)")
-    work = os.path.join(HERE, "out", "enums")
+def served_edit(name, edit_to, wait_first, prefixes):
+    """a copy of name/ served with hotreload.DevServer and run in node, until it says
+    wait_first, then edit_to(src) edits its sources, once: its lines with the prefixes, from
+    the start to the reload's end, or None"""
+    work = os.path.join(HERE, "out", name)
     shutil.rmtree(work, ignore_errors=True)
-    shutil.copytree(os.path.join(HERE, "enums"), work)
+    shutil.copytree(os.path.join(HERE, name), work)
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     server = Program(work, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
-                     os.path.join(LOGS, "dev-enums-server.log"))
+                     os.path.join(LOGS, f"dev-{name}-server.log"))
     p = None
     try:
         if not server.wait(r"hotreload: ready", timeout=120, show=False):
             return None
         env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
-        p = Program(work, ["node", "out/main.js"], os.path.join(LOGS, "dev-enums.log"), env=env)
-        if not p.wait(r"^enums ", timeout=30):
+        p = Program(work, ["node", "out/main.js"], os.path.join(LOGS, f"dev-{name}.log"), env=env)
+        if not p.wait(wait_first, timeout=30):
             return None
-        game = os.path.join(work, "src", "Game.hx")
-        text = open(game).read()
-        save(game, text.replace("enum Mood {\n\tHappy;", "enum Mood {\n\tCalm;\n\tHappy;").replace("edited:Mood = Happy", "edited:Mood = Sad"))
-        # (the report comes before reload: done: the main class's afterReload is called first)
+        edit_to(os.path.join(work, "src"))
+        # (what the main class's afterReload says comes before reload: done)
         if not p.wait(r"^hotreload: reload: done", timeout=60):
             return None
-        return [l for l in open(p.log).read().splitlines() if l.startswith(("enums ", "hotreload: enum:"))]
+        return [l for l in open(p.log).read().splitlines() if l.startswith(prefixes)]
     finally:
         if p:
             p.stop()
         server.stop()
+
+
+def dev_enums():
+    """enums/, edited once: a constructor put before the others, and a static's first value
+    edited to an enum constant. Whether enum values a closure holds (which the reload
+    doesn't walk to) still match their cases and compare equal to the new code's
+    constants, as do the walked and the new ones. Its lines, or None"""
+    print("\n== enum values across a reload that reorders their constructors (JS)")
+
+    def edit_to(src):
+        game = os.path.join(src, "Game.hx")
+        text = open(game).read()
+        save(game, text.replace("enum Mood {\n\tHappy;", "enum Mood {\n\tCalm;\n\tHappy;").replace("edited:Mood = Happy", "edited:Mood = Sad"))
+
+    return served_edit("enums", edit_to, r"^enums ", ("enums ", "hotreload: enum:"))
+
+
+def dev_code():
+    """code/, edited once in what a reload cannot bring in: main, a closure main made, the
+    constructor of an object made before, a field initializer, and a field renamed. Its
+    lines: the reload's messages, sorted, and what the program says, or None"""
+    print("\n== what a reload cannot bring in, said (JS)")
+
+    def edit_to(src):
+        main = os.path.join(src, "Main.hx")
+        text = open(main).read()
+        for old, new in [("\t\tenemy = new Enemy();\n", "\t\tenemy = new Enemy();\n\t\tsay(\"main v2\");\n"),
+                         ('"tick v1"', '"tick v2"'), ("hp = 3;", "hp = 4;"), ("shield = 10;", "shield = 20;"),
+                         ("var mana = 5;", "var energy = 5;")]:
+            assert old in text, old
+            text = text.replace(old, new)
+        save(main, text)
+
+    lines = served_edit("code", edit_to, r"^code ", ("code ", "hotreload: main:", "hotreload: constructor:", "hotreload: field:", "hotreload: closure:"))
+    if lines is None:
+        return None
+    return sorted(l for l in lines if l.startswith("hotreload:")) + [l for l in lines if not l.startswith("hotreload:")]
 
 
 def server():
@@ -388,8 +423,17 @@ DEV_BIND = ["click v1", "tick v1", "click v2", "tick v2", "removed=true listener
 # The captured Angry(3) matches Sad's case: a value with arguments the reload doesn't reach
 # can't be kept, only said
 DEV_ENUMS = ["enums held=sad captured=sad angry3 true edited=happy false",
-             "hotreload: enum: Mood.Angry moved (index 2 to 3; a value of it the reload does not reach, such as one a closure holds, matches another case)",
+             "hotreload: enum: Mood.Angry moved (index 2 to 3, unreached values match another case)",
              "enums held=sad captured=sad sad true edited=sad true"]
+
+# the code-change test's lines: the reload's messages, sorted, then the program's, before and
+# after. The program's are the same: none of the edits reaches what was already made
+DEV_CODE = ["hotreload: closure: src/Main.hx:15 changed (in Main.main, ones made before the reload run the old body)",
+            "hotreload: constructor: Enemy changed (existing objects not constructed again)",
+            "hotreload: field: Enemy.mana removed, Enemy.energy added (values not moved)",
+            "hotreload: field: Enemy.shield initializer changed (existing objects keep their values)",
+            "hotreload: main: Main.main changed (not run again); use an @:afterHotReload hook",
+            "code tick v1 hp=3 shield=10", "code tick v1 hp=3 shield=10"]
 
 
 def check(name, result):
@@ -421,6 +465,9 @@ def check(name, result):
     if "dev_enums" in result and result["dev_enums"] != DEV_ENUMS:
         print(f"  FAILED {name}, enum values across a reload: {result['dev_enums']!r}, expected {DEV_ENUMS!r}")
         failures += 1
+    if "dev_code" in result and result["dev_code"] != DEV_CODE:
+        print(f"  FAILED {name}, what a reload cannot bring in: {result['dev_code']!r}, expected {DEV_CODE!r}")
+        failures += 1
     if result.get("dev_watch") is False:
         print(f"  FAILED {name}: the DevServer didn't watch and build a directory it was told to watch")
         failures += 1
@@ -447,6 +494,7 @@ if __name__ == "__main__":
     result["dev_watch"] = dev_watch()
     result["dev_bind"] = dev_bind()
     result["dev_enums"] = dev_enums()
+    result["dev_code"] = dev_code()
     result["server"] = server()
     print("\n== results")
     failures = check("js", result)

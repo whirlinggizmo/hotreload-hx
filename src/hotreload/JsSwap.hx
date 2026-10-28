@@ -65,11 +65,16 @@ class JsSwap {
 	}
 
 	/**
-		A newly loaded bundle's enum constants with no arguments (`Sad`) are the running
-		bundle's, each given its index in the new code, before the new code runs: the same
-		objects, so a value the reload doesn't reach (one a closure holds) still matches its
-		case and equals the new code's constant. A value with arguments is made anew each
-		time, so there's nothing to keep: a constructor of one that moved is said
+		Gives a newly loaded bundle the running bundle's enum constants that take no arguments.
+
+		Runs before the new bundle's code. Each constant (`Sad`) keeps its object and receives
+		its index in the new code. A value the reload does not reach, such as one a closure
+		holds, still matches its case and equals the new code's constant. A value with
+		arguments is a new object each time it is made, so it cannot be kept. A message
+		reports a constructor with arguments whose index changed.
+
+		@param old  The running bundle's enums, by name.
+		@param neu  The new bundle's enums, by name.
 	**/
 	static function adoptEnums(old:Dynamic, neu:Dynamic) {
 		for (name in Reflect.fields(neu)) {
@@ -92,7 +97,7 @@ class JsSwap {
 					Reflect.setField(n, ctor, value);
 					now[i] = value;
 				} else if (was.indexOf(value) != i)
-					log('enum: $name.$ctor moved (index ${was.indexOf(value)} to $i; a value of it the reload does not reach, such as one a closure holds, matches another case)');
+					log('enum: $name.$ctor moved (index ${was.indexOf(value)} to $i, unreached values match another case)');
 			}
 		}
 	}
@@ -295,6 +300,10 @@ class JsSwap {
 		}
 		walker.finish();
 
+		for (p in pairs)
+			if (p.carry)
+				compareCode(p.name, Reflect.field(p.o, "__hot_code__"), Reflect.field(p.n, "__hot_code__"));
+
 		// the old classes forward to the new ones
 		for (p in pairs) {
 			var n = p.n;
@@ -323,6 +332,56 @@ class JsSwap {
 				r.afterReload();
 		log('reload: done (${[for (p in pairs) if (p.carry) p].length} classes, $kept statics kept, $reset reset, ${walker.objects} objects, '
 			+ '${Math.round((haxe.Timer.stamp() - start) * 1000)} ms)');
+	}
+
+	/**
+		Reports the edits to a class that a reload cannot bring in.
+
+		The build records each class's code as hashes (`__hot_code__`, Builder's `CodeInfo`).
+		A changed main is reported because it does not run again. A changed constructor is
+		reported because objects made before the reload are not constructed again. A changed
+		field initializer is reported because existing objects keep their values. A field
+		removed while another is added is reported as a possible rename, since values are
+		not moved. A changed closure is reported because instances made before the reload
+		keep the old body.
+
+		Closures are compared per method, as sets of hashes. A closure counts as changed only
+		when as many hashes went as came, so an added closure is not taken for an edit.
+
+		@param name  The class's full name.
+		@param was  The running code's `__hot_code__`, or null.
+		@param now  The new code's `__hot_code__`, or null.
+	**/
+	static function compareCode(name:String, was:Dynamic, now:Dynamic) {
+		if (was == null || now == null)
+			return;
+		if (was.main != null && now.main != null && was.main != now.main)
+			log('main: $name.main changed (not run again); use an @:afterHotReload hook');
+		if (was.ctor != null && now.ctor != null && was.ctor != now.ctor)
+			log('constructor: $name changed (existing objects not constructed again)');
+		var removed = [for (f in Reflect.fields(was.fields)) if (!Reflect.hasField(now.fields, f)) '$name.$f'];
+		var added = [];
+		for (f in Reflect.fields(now.fields)) {
+			if (!Reflect.hasField(was.fields, f))
+				added.push('$name.$f');
+			else if (Reflect.field(now.fields, f) != "" && Reflect.field(was.fields, f) != Reflect.field(now.fields, f))
+				log('field: $name.$f initializer changed (existing objects keep their values)');
+		}
+		if (removed.length > 0 && added.length > 0)
+			log('field: ${removed.join(", ")} removed, ${added.join(", ")} added (values not moved)');
+		for (method in Reflect.fields(now.closures)) {
+			var before:Array<Dynamic> = Reflect.field(was.closures, method);
+			if (before == null)
+				continue;
+			var gone = [for (c in before) c.hash];
+			var came = [];
+			for (c in (Reflect.field(now.closures, method):Array<Dynamic>))
+				if (!gone.remove(c.hash))
+					came.push(c);
+			if (came.length == gone.length)
+				for (c in came)
+					log('closure: ${c.at} changed (in $name.$method, ones made before the reload run the old body)');
+		}
 	}
 
 	/**
