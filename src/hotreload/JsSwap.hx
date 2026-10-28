@@ -23,7 +23,8 @@ import js.Syntax;
 	   objects: an object of an old class is given the new class's prototype, in place
 	   (the same object, so every reference to it is still good), and its new fields
 	   their initializers. An enum value is made again from the new enum, by its
-	   constructor's name;
+	   constructor's name; a constant with no arguments is already the new enum's, the
+	   same object, as the new bundle took the running one's as it loaded (adoptEnums);
 	4. the old classes forward to the new ones: their statics read and write the new
 	   classes', and their methods are the new code's. The first bundle's classes are
 	   re-pointed on every swap too, since the main class, and anything else from before
@@ -54,11 +55,46 @@ class JsSwap {
 		};
 		var bundles:Array<Dynamic> = state.bundles;
 		bundles.push(bundle);
-		if (bundles.length > 1)
+		if (bundles.length > 1) {
+			adoptEnums(bundles[bundles.length - 2].enums, bundle.enums);
 			return true;
+		}
 		Syntax.code("setTimeout({0}, 0)", poll);
 		Syntax.code("setTimeout({0}, 0)", pollAssets);
 		return false;
+	}
+
+	/**
+		A newly loaded bundle's enum constants with no arguments (`Sad`) are the running
+		bundle's, each given its index in the new code, before the new code runs: the same
+		objects, so a value the reload doesn't reach (one a closure holds) still matches its
+		case and equals the new code's constant. A value with arguments is made anew each
+		time, so there's nothing to keep: a constructor of one that moved is said
+	**/
+	static function adoptEnums(old:Dynamic, neu:Dynamic) {
+		for (name in Reflect.fields(neu)) {
+			var o:Dynamic = Reflect.field(old, name);
+			var n:Dynamic = Reflect.field(neu, name);
+			if (o == null || o == n || o.__constructs__ == null || n.__constructs__ == null)
+				continue;
+			var was:Array<Dynamic> = o.__constructs__;
+			var now:Array<Dynamic> = n.__constructs__;
+			for (i in 0...now.length) {
+				var ctor:String = now[i]._hx_name;
+				var value:Dynamic = Reflect.field(o, ctor);
+				if (value == null)
+					continue;
+				var made = Syntax.code("typeof {0} == 'function'", now[i]);
+				if (made != Syntax.code("typeof {0} == 'function'", value))
+					continue;
+				if (!made) {
+					value._hx_index = i;
+					Reflect.setField(n, ctor, value);
+					now[i] = value;
+				} else if (was.indexOf(value) != i)
+					log('enum: $name.$ctor moved (index ${was.indexOf(value)} to $i; a value of it the reload does not reach, such as one a closure holds, matches another case)');
+			}
+		}
 	}
 
 	/**
@@ -425,7 +461,8 @@ private class Walker {
 		var name:String = v.__enum__;
 		var oldEnum:Dynamic = Reflect.field(oldEnums, name);
 		var newEnum:Dynamic = Reflect.field(newEnums, name);
-		if (oldEnum == null || newEnum == null || oldEnum == newEnum) {
+		// (a constant with no arguments is already the new enum's: JsSwap.adoptEnums)
+		if (oldEnum == null || newEnum == null || oldEnum == newEnum || (v._hx_name != null && Reflect.field(newEnum, v._hx_name) == v)) {
 			seen.set(v, v);
 			return v;
 		}

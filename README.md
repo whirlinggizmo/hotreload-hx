@@ -232,6 +232,16 @@ class Enemy {
 hotreload walks arrays, maps, anonymous structures, classes' objects and enum values
 (made again by constructor name). Shared objects stay shared and cycles stay cycles.
 
+An enum constant with no arguments (`Sad`) is the same object across reloads, even where
+the walk doesn't reach, such as in a closure: it still matches its `case` and equals the
+new code's `Sad`, with constructors added or moved before it. A value with arguments
+(`Angry(3)`) the walk doesn't reach can't be updated: when its constructor moves, it
+matches another `case`, and the reload says so:
+
+```
+hotreload: enum: game.Mood.Angry moved (index 2 to 3; a value of it the reload does not reach, such as one a closure holds, matches another case)
+```
+
 ### Callbacks
 
 Every call by name reaches the new code, from any code, however old. A method passed as a
@@ -293,7 +303,8 @@ connections.
 - Statics follow [the rules](#statics): kept, but for an edited first value and
   `@:resetOnHotReload`.
 - Objects the kept statics hold get the new classes in place. New fields start from their
-  initializers, and enum values are rebuilt by constructor name.
+  initializers, and enum values are rebuilt by constructor name. Enum constants with no
+  arguments are the running code's, with the new code's indices.
 - Old classes forward to the new ones, so leftover old code (a callback, an object nothing
   walked to) runs the new code, on the same state.
 - A method reference in a static (`onFrame = Guest.frame`) points to the new code, and a
@@ -312,6 +323,9 @@ breakpoint also hits in the new code after a reload.
 ## Limits
 
 - A closure made before a reload keeps its own body.
+- An enum value with arguments that the reload doesn't reach (one a closure holds) keeps
+  its constructor's old index: when constructors are added or moved before it, it matches
+  another `case`.
 - Code that already ran isn't run again: a listener a new version of `init()` would add
   isn't added until `init()` runs. Use an `@:afterHotReload` hook for that.
 - A renamed or removed field is `undefined` on carried objects, as is a new field with no

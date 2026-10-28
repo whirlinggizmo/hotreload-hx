@@ -28,6 +28,9 @@ it runs, and its builds. It checks the rules for statics:
 - a listener added before a reload as a bound method (addEventListener(CLICK, onClick))
   or a static function, where the reload's walk doesn't reach it, runs the new code after
   it, and the new code can remove it;
+- an enum constant with no arguments is the same object across a reload, its index the new
+  code's: one a closure holds still matches its case and equals the new code's constant,
+  with constructors put before it; a moved constructor with arguments is said;
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
@@ -304,6 +307,41 @@ def dev_bind():
         server.stop()
 
 
+def dev_enums():
+    """a copy of enums/ served and run in node, edited once: a constructor put before the
+    others, and a static's first value edited to an enum constant. Whether enum values a
+    closure holds (which the reload doesn't walk to) still match their cases and compare
+    equal to the new code's constants, as do the walked and the new ones. Its lines, or None"""
+    print("\n== enum values across a reload that reorders their constructors (JS)")
+    work = os.path.join(HERE, "out", "enums")
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(HERE, "enums"), work)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = Program(work, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
+                     os.path.join(LOGS, "dev-enums-server.log"))
+    p = None
+    try:
+        if not server.wait(r"hotreload: ready", timeout=120, show=False):
+            return None
+        env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
+        p = Program(work, ["node", "out/main.js"], os.path.join(LOGS, "dev-enums.log"), env=env)
+        if not p.wait(r"^enums ", timeout=30):
+            return None
+        game = os.path.join(work, "src", "Game.hx")
+        text = open(game).read()
+        save(game, text.replace("enum Mood {\n\tHappy;", "enum Mood {\n\tCalm;\n\tHappy;").replace("edited:Mood = Happy", "edited:Mood = Sad"))
+        # (the report comes before reload: done: the main class's afterReload is called first)
+        if not p.wait(r"^hotreload: reload: done", timeout=60):
+            return None
+        return [l for l in open(p.log).read().splitlines() if l.startswith(("enums ", "hotreload: enum:"))]
+    finally:
+        if p:
+            p.stop()
+        server.stop()
+
+
 def server():
     """the program built through a compilation server, as the DevServer and an editor do:
     four builds, the later ones from the server's cache, into an output directory that
@@ -346,6 +384,13 @@ WARNINGS = sorted([
 DEV_BIND = ["click v1", "tick v1", "click v2", "tick v2", "removed=true listeners=0",
             "click v3", "tick v3", "removed=true listeners=0"]
 
+# the enum test's lines: before the reload, the moved constructor with arguments, and after.
+# The captured Angry(3) matches Sad's case: a value with arguments the reload doesn't reach
+# can't be kept, only said
+DEV_ENUMS = ["enums held=sad captured=sad angry3 true edited=happy false",
+             "hotreload: enum: Mood.Angry moved (index 2 to 3; a value of it the reload does not reach, such as one a closure holds, matches another case)",
+             "enums held=sad captured=sad sad true edited=sad true"]
+
 
 def check(name, result):
     """what the test found, against what's expected"""
@@ -373,6 +418,9 @@ def check(name, result):
     if "dev_bind" in result and result["dev_bind"] != DEV_BIND:
         print(f"  FAILED {name}, a bound method across reloads: {result['dev_bind']!r}, expected {DEV_BIND!r}")
         failures += 1
+    if "dev_enums" in result and result["dev_enums"] != DEV_ENUMS:
+        print(f"  FAILED {name}, enum values across a reload: {result['dev_enums']!r}, expected {DEV_ENUMS!r}")
+        failures += 1
     if result.get("dev_watch") is False:
         print(f"  FAILED {name}: the DevServer didn't watch and build a directory it was told to watch")
         failures += 1
@@ -398,6 +446,7 @@ if __name__ == "__main__":
     result["dev_relist"] = dev_relist()
     result["dev_watch"] = dev_watch()
     result["dev_bind"] = dev_bind()
+    result["dev_enums"] = dev_enums()
     result["server"] = server()
     print("\n== results")
     failures = check("js", result)
