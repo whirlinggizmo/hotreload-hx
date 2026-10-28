@@ -14,47 +14,51 @@ using haxe.macro.Tools;
 
 private enum Mode {
 	Off;
-	Js;       // a hot build: -D hotreload, which hotreload.DevServer serves and rebuilds
-	JsReload; // a reload's build, which the DevServer starts: -D hotreload_reload
+	Js;       // A hot build (-D hotreload), which hotreload.DevServer serves and rebuilds.
+	JsReload; // A reload's build (-D hotreload_reload), which the DevServer starts.
 }
 #end
 
 /**
-	What makes a build hot: `--macro hotreload.Builder.init()` (which `-lib hotreload-hx` adds)
-	and `-D hotreload`, on a JS build. Without the define it does nothing, and the same
-	sources build one ordinary program: the reload metadata is ignored.
+	Provides the build macro that makes a JS build hot.
 
-	A hot build reloads whole: the page loads the new bundle beside the old one, and the
-	reloader (Reloader, JsSwap) makes its classes the current ones, objects and all. Every
-	static keeps its value, but one whose first value was edited, which starts over from
-	the new one, and one marked `@:resetOnHotReload`. What it takes from here: each
-	class's statics' types and first values, as written (`__hot_statics__`), a guard that
-	keeps a reloaded bundle's `main` from running again, each class's field initializers,
-	for the objects a reload carries over (their new fields start from them), the reload
-	hooks, a `$bind` that follows a bound method to its new code, the same for a static
-	function passed as a value, and, for the DevServer, how to build it again.
+	A build is hot with `--macro hotreload.Builder.init()` (which `-lib hotreload-hx` adds) and
+	`-D hotreload`, on a JS target. Without the define the macro does nothing. The same sources
+	then build one ordinary program, and the reload metadata is ignored.
+
+	A hot build reloads whole. The page loads the new bundle beside the old one, and the
+	reloader (Reloader, JsSwap) makes the new bundle's classes the current ones, objects
+	included. Every static keeps its value, except one whose first value was edited (it starts
+	over from the new value) and one marked `@:resetOnHotReload`.
+
+	The macro adds each class's statics' types and first values, as written
+	(`__hot_statics__`). It adds a guard that keeps a reloaded bundle's `main` from running
+	again. It adds each class's field initializers, from which the new fields of an object a
+	reload carries over start. It registers the reload hooks. It replaces `$bind` with one that
+	follows a bound method to its new code, and does the same for a static function passed as a
+	value. It also records, for the DevServer, how to build the bundle again.
 **/
 class Builder {
 	#if macro
 	static var mode = Off;
 	static var mainClass:String;
-	/** the project's own class paths: its code, watched **/
+	/** The project's own class paths, which hold its code and are watched. **/
 	static var projectDirs:Array<String> = [];
 
-	/** the class paths inside the project's directory left out of it: its local repository's libraries **/
+	/** The class paths inside the project's directory excluded from it (its local repository's libraries). **/
 	static var excludedDirs:Array<String> = [];
 
-	/** the main class's file, found from the class paths **/
+	/** The main class's file, found from the class paths. **/
 	static var mainFile:String;
 
 	static var configured = false;
 
 	public static function init() {
-		// once per build, however many times the build names the library
+		// Once per build, however many times the build names the library.
 		if (Context.defined("hotreload_initialized"))
 			return;
 		Compiler.define("hotreload_initialized");
-		// a compilation server keeps a macro's statics from one build to the next
+		// A compilation server keeps a macro's statics from one build to the next.
 		mode = Off;
 		mainClass = null;
 		projectDirs = [];
@@ -66,7 +70,7 @@ class Builder {
 		if (!Context.defined("hotreload"))
 			return;
 		if (!Context.defined("js")) {
-			// (an init macro's warning isn't shown)
+			// (An init macro's warning is not shown.)
 			Sys.stderr().writeString("hotreload: build: not hot (only a JS build reloads)\n");
 			Sys.stderr().flush();
 			return;
@@ -87,9 +91,10 @@ class Builder {
 	}
 
 	static function initJs() {
-		// a reload's swap fails on ES5 output ("newHooks.runAfter is not a function"). js-es
-		// can't be set from here: the compiler has read it already (an ES5 constructor's
-		// `this` before `super()` would stay), so it's set on the command line, by the library's extraParams.hxml
+		// A reload's swap fails on ES5 output ("newHooks.runAfter is not a function"). js-es
+		// cannot be set from here, because the compiler has already read it (an ES5
+		// constructor's `this` before `super()` would stay). The library's extraParams.hxml
+		// sets it on the command line instead.
 		var es = Context.definedValue("js-es");
 		if (es == null || Std.parseInt(es) == null || Std.parseInt(es) < 6)
 			Context.fatalError("hotreload: a hot JS build needs -D js-es=6 (-lib hotreload-hx sets it; something set it lower)", Context.currentPos());
@@ -120,7 +125,8 @@ class Builder {
 			if (configured)
 				return;
 			configured = true;
-			// (a reload's build says it too when asked: the DevServer watches its class paths, which an edited hxml changes)
+			// (A reload's build writes the config too when asked. The DevServer watches its class
+			// paths, which an edited hxml changes.)
 			if (mode == JsReload && !Context.defined("hotreload_config"))
 				return;
 
@@ -132,25 +138,32 @@ class Builder {
 				js: Path.normalize(absolute(cwd, js)),
 				mainClass: mainClass,
 			};
-			// (the output's directory may not be there yet: the compiler makes it later)
+			// (The output's directory may not exist yet. The compiler creates it later.)
 			if (!sys.FileSystem.exists(Path.directory(path)))
 				sys.FileSystem.createDirectory(Path.directory(path));
 			sys.io.File.saveContent(path, haxe.Json.stringify(config, "\t"));
 		});
 	}
 
-	/** a bound method's function, in a hot JS build: its method looked up as it's called, so one made before a reload runs the new code **/
+	/**
+		The `$bind` function of a hot JS build.
+
+		It looks up the method each time it is called, so a bound method made before a reload
+		runs the new code.
+	**/
 	static inline var LATE_BIND = "function $bind(o,m) { if( m == null ) return null; if( m.__id__ == null ) m.__id__ = $global.$haxeUID++; var f; "
 		+ "if( o.hx__closures__ == null ) o.hx__closures__ = {}; else f = o.hx__closures__[m.__id__]; if( f == null ) { "
 		+ "f = function() { var g = f.method; while( g.__hot_next__ != null ) g = f.method = g.__hot_next__; return g.apply(o,arguments); }; "
 		+ "f.method = m; o.hx__closures__[m.__id__] = f; } return f; }";
 
 	/**
+		Replaces the output's `$bind` with one that follows a bound method to its newest code.
+
 		A bound method (`addEventListener(CLICK, onClick)`) is Haxe's `$bind`, which binds the
-		method as it is (`m.bind(o)`): one made before a reload would run the old code. The
-		output's `$bind` is replaced by one that follows the method to its newest code
-		(`__hot_next__`, which a swap sets: JsSwap), on its one line, so no line moves for the
-		source map. A bundle with no bound method has no `$bind`
+		method as it is (`m.bind(o)`). One made before a reload would run the old code. The
+		replacement follows the method through `__hot_next__`, which a swap sets (JsSwap). It
+		stays on the original's single line, so no line moves for the source map. A bundle with
+		no bound method has no `$bind`, and is left unchanged.
 	**/
 	static function lateBind(output:String) {
 		if (!FileSystem.exists(output))
@@ -167,13 +180,15 @@ class Builder {
 	}
 
 	/**
-		A static function passed as a value (`addEventListener("keydown", Game.onKey)`) is
-		the function itself: one passed before a reload would run the old code, and the new
-		code's `Game.onKey` is another function, which removes nothing. Each one found
-		(findStaticValues) is made a function that calls it (`__hot_impl__`), on its class's
-		closing line, so no line moves for the source map; a swap keeps that function, and
-		points it to the new code (JsSwap). One whose class isn't in the output as Haxe
-		writes it is told
+		Makes each static function passed as a value late-bound in the output.
+
+		A static function passed as a value (`addEventListener("keydown", Game.onKey)`) is the
+		function itself. One passed before a reload would run the old code. The new code's
+		`Game.onKey` is another function, so removing it removes nothing. Each one that
+		findStaticValues finds is replaced by a function that calls it (`__hot_impl__`). The
+		replacement is added on its class's closing line, so no line moves for the source map.
+		A swap keeps that function and points it to the new code (JsSwap). A function whose
+		class is not in the output as Haxe writes it is reported as a warning.
 	**/
 	static function lateStatics(output:String) {
 		if (staticValues == null || !staticValues.keys().hasNext() || !FileSystem.exists(output))
@@ -202,9 +217,12 @@ class Builder {
 	}
 
 	/**
-		The project: its own class paths (inside its directory; not the standard library's
-		or a haxelib's, a local repository's, `.haxelib/`, inside it too), or else the main
-		class's directory, and the main class's file. Its sources are watched
+		Finds the project's own class paths and the main class's file.
+
+		The project's own class paths are those inside its directory. The standard library's
+		and a haxelib's are not, and neither is a local repository's (`.haxelib/`), even though
+		it is inside the directory. Without any, the main class's directory is used. The
+		project's sources are watched.
 	**/
 	static function findProject(args:Array<String>, cwd:String) {
 		mainFile = try Path.normalize(FileSystem.absolutePath(Context.resolvePath(mainClass.replace(".", "/") + ".hx"))) catch (_) null;
@@ -227,16 +245,20 @@ class Builder {
 	}
 
 	/**
-		The static functions passed as values (`addEventListener("keydown", Game.onKey)`),
-		by their classes' JS names: each one's position, for when its class isn't found in
-		the output. Found by findStaticValues, made late-bound by lateStatics
+		The static functions passed as values (`addEventListener("keydown", Game.onKey)`), by
+		their classes' JS names.
+
+		Each holds the position of its first use, reported when its class is not found in the
+		output. findStaticValues fills it, and lateStatics makes each function late-bound.
 	**/
 	static var staticValues:Map<String, {cls:String, names:Map<String, Position>}>;
 
 	/**
-		The static functions the code passes as values, anywhere but in the standard
-		library and this one: they're made late-bound (lateStatics). A method of an object
-		passed as a value is Haxe's `$bind`, made late-bound by lateBind
+		Finds the static functions the code passes as values, anywhere but in the standard
+		library and this one.
+
+		lateStatics makes them late-bound. A method of an object passed as a value is Haxe's
+		`$bind`, which lateBind makes late-bound.
 	**/
 	static function findStaticValues(types:Array<ModuleType>) {
 		staticValues = [];
@@ -276,13 +298,17 @@ class Builder {
 		}
 	}
 
-	/** a class of the standard library's or this one's: never reloaded **/
+	/** Returns whether a class belongs to the standard library or to this one, which are never reloaded. **/
 	static function isLibraryOwn(c:ClassType):Bool {
 		var file = fileOf(c.pos);
 		return file == null || file.startsWith(stdDir()) || file.startsWith(ownDir());
 	}
 
-	/** a class's name in the JS output (Haxe's genjs: its flat path, an abstract's implementation by the abstract's) **/
+	/**
+		Returns a class's name in the JS output, as Haxe's genjs writes it.
+
+		The name is the class's flat path. An abstract's implementation takes the abstract's.
+	**/
 	static function jsName(c:ClassType):String {
 		var native = c.meta.extract(":native");
 		if (native.length > 0 && native[0].params.length > 0)
@@ -301,7 +327,12 @@ class Builder {
 	static function flatPath(path:Array<String>):String
 		return [for (part in path) part.split("_").join("_$")].join("_");
 
-	/** `@:build` on every class of a hot build: its statics' types and first values, the reload hooks, and what a carried object needs **/
+	/**
+		Builds every class of a hot build (`@:build`).
+
+		It adds the class's statics' types and first values, the reload hooks, and what an
+		object carried across a reload needs.
+	**/
 	public static function build():Array<Field> {
 		var ref = Context.getLocalClass();
 		if (ref == null)
@@ -311,10 +342,12 @@ class Builder {
 	}
 
 	/**
-		What the reload metadata can be on: a hook (`@:beforeHotReload`, `@:afterHotReload`),
-		a static function with no parameters; `@:resetOnHotReload`, a static var that holds a
-		value. `@:hot`, which kept a static on the hxcpp branch, does nothing, and is warned
-		about where it's written: every static is kept
+		Checks that the reload metadata is on a field it applies to.
+
+		A hook (`@:beforeHotReload`, `@:afterHotReload`) must be a static function with no
+		parameters. `@:resetOnHotReload` must be on a static var that holds a value. `@:hot`,
+		which kept a static on the hxcpp branch, does nothing, since every static is kept. It is
+		warned about where it is written.
 	**/
 	static function checkMeta(field:Field, hook:MetadataEntry, reset:Bool) {
 		if (!field.access.contains(AStatic))
@@ -332,13 +365,13 @@ class Builder {
 			Context.error("@:resetOnHotReload: a static var that holds a value", field.pos);
 	}
 
-	/** a first value as written, shortened for a message: `3.0`, `"seven"`, `new Map()` **/
+	/** Returns a first value as written, shortened for a message (`3.0`, `"seven"`, `new Map()`). **/
 	static function shortText(e:Expr):String {
 		var text = ~/\s+/g.replace(e.toString(), " ");
 		return text.length > 40 ? text.substr(0, 37) + "..." : text;
 	}
 
-	/** a class: its hooks, its main's guard, its field initializers, and its statics' types and first values **/
+	/** Adds a class's hooks, its main's guard, its field initializers, and its statics' types and first values. **/
 	static function buildJs(cls:ClassType, fields:Array<Field>, className:String):Array<Field> {
 		var changed = false;
 		var result = [];
@@ -355,10 +388,10 @@ class Builder {
 			if (hot != null && mode == Js)
 				Context.warning("hotreload: @:hot is deprecated: every static is kept now. "
 					+ "Remove it, or use @:resetOnHotReload to reset a static on every reload.", hot.pos);
-			// a static's type and first value, as written, which a reload compares (JsSwap): a
-			// first value edited starts it over from the new one; a type changed keeps the value
-			// when it's still the same kind. (A property with no storage, `(get, never)`,
-			// holds no value: nothing to keep)
+			// A static's type and first value, as written, which a reload compares (JsSwap). A
+			// static whose first value was edited starts over from the new one. A static whose
+			// type changed keeps its value when the value is still the same kind. (A property
+			// with no storage, `(get, never)`, holds no value, so there is nothing to keep.)
 			if (field.access.contains(AStatic) && !field.access.contains(AInline))
 				switch (field.kind) {
 					case FVar(t, e) | FProp(_, _, t, e) if (hasStorage(field)):
@@ -383,8 +416,8 @@ class Builder {
 			} else if (field.name == "main" && field.access.contains(AStatic) && isMain(cls)) {
 				switch (field.kind) {
 					case FFun(f):
-						// a reloaded bundle's classes replace the running ones: its main mustn't
-						// start the program a second time
+						// A reloaded bundle's classes replace the running ones. Its main must not
+						// start the program a second time.
 						f.expr = macro {
 							if (hotreload.Reloader.isReload())
 								return;
@@ -418,8 +451,11 @@ class Builder {
 	}
 
 	/**
-		A JS class's field initializers, for an object a reload carries over: each of its
-		fields that the object doesn't have (a new one) starts from its initializer
+		Returns a JS class's field initializer function, for an object a reload carries over.
+
+		Each field the object does not have (a new one) starts from its initializer.
+
+		@return  The function, or null if no field has an initializer.
 	**/
 	static function jsFieldInitializer(className:String, fields:Array<Field>):Field {
 		var inits = [];
@@ -433,7 +469,7 @@ class Builder {
 			}
 			if (e != null) {
 				var name = f.name;
-				// a final field can't be assigned past its constructor, but can be set
+				// A final field cannot be assigned outside its constructor, but it can be set.
 				var set = f.access.contains(AFinal) ? macro std.Reflect.setField(this, $v{name}, $e) : macro this.$name = $e;
 				inits.push(macro if (!std.Reflect.hasField(this, $v{name})) $set);
 			}
@@ -450,8 +486,11 @@ class Builder {
 	}
 
 	/**
-		whether a var or property holds a value: a var, or a property with `default` or `null`
-		on either side, or `@:isVar`; not `(get, never)` or `(get, set)`, which are their accessors
+		Returns whether a var or property holds a value.
+
+		A var holds one. A property holds one when either side is `default` or `null`, or when
+		it has `@:isVar`. A property such as `(get, never)` or `(get, set)` holds none. Its value
+		comes from its accessors.
 	**/
 	public static function hasStorage(field:Field):Bool {
 		return switch (field.kind) {
@@ -474,10 +513,11 @@ class Builder {
 
 	static var std:String;
 
-	/** the standard library's directory: never the project's **/
+	/** Returns the standard library's directory, which is never the project's. **/
 	static function stdDir():String {
 		if (std == null)
-			// StdTypes.hx is only at the standard library's root (Std.hx is overridden per target, in cpp/_std/, js/_std/)
+			// StdTypes.hx is only at the standard library's root. (Std.hx is overridden per target,
+			// in cpp/_std/ and js/_std/.)
 			std = Path.addTrailingSlash(Path.directory(Path.normalize(FileSystem.absolutePath(Context.resolvePath("StdTypes.hx")))));
 		return std;
 	}
@@ -485,8 +525,10 @@ class Builder {
 	static var own:String;
 
 	/**
-		this library's own class path (its src/), never the project's, wherever it is: the
-		reloader's statics aren't started over, nor its code warned about
+		Returns this library's own class path (its src/), which is never the project's.
+
+		Wherever the library is, the reloader's statics are not started over, and its code is
+		not warned about.
 	**/
 	static function ownDir():String {
 		if (own == null)
@@ -608,21 +650,32 @@ private class CodeInfo {
 }
 #end
 
-/** how a JS hot build was made, for the DevServer to build it again **/
+/** Represents how a JS hot build was made, for the DevServer to build it again. **/
 typedef JsConfig = {
-	/** the build's directory, which its paths are from **/
+	/** Gets or sets the build's directory, which its paths are relative to. **/
 	var cwd:String;
 
-	/** its command line, whole: a reload's build writes the same bundle **/
+	/**
+		Gets or sets the build's whole command line.
+
+		A reload's build uses it, so it writes the same bundle.
+	**/
 	var args:Array<String>;
 
-	/** where the sources are: the project's own class paths, watched, and below **/
+	/**
+		Gets or sets the project's own class paths, which hold the sources.
+
+		The DevServer watches them and everything below them.
+	**/
 	var dirs:Array<String>;
 
-	/** the class paths inside the project's directory that aren't its own: its local repository's libraries (.haxelib/) **/
+	/**
+		Gets or sets the class paths inside the project's directory that are not its own (its
+		local repository's libraries, in .haxelib/).
+	**/
 	var ?excluded:Array<String>;
 
-	/** the bundle **/
+	/** Gets or sets the path of the bundle. **/
 	var js:String;
 
 	var mainClass:String;

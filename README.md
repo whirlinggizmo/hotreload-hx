@@ -1,35 +1,35 @@
 # hotreload-hx
 
-Hot reload for Haxe JavaScript applications, in the browser or in node. When you save a
-change, hotreload's dev server rebuilds the bundle, and the running program takes on its
-classes, keeping its state. It's for applications with a loop, such as a game or a tool,
-where a reload of the page would cost you the loaded assets, the GPU's state and where you
-were. Release builds compile the same code with no reloading and no cost.
+Hot reload for Haxe JavaScript applications, in the browser or in node. On each saved change,
+the hotreload dev server rebuilds the bundle. The running program takes on the new classes and
+keeps its state. It is meant for applications with a loop, such as a game or a tool, where a
+page reload loses the loaded assets, the GPU's state and the current place in the program.
+Release builds compile the same code with no reloading and no cost.
 
 Native reload (hxcpp, through cppia) is on the [`hxcpp`](https://github.com/whirlinggizmo/hotreload-hx/tree/hxcpp)
-branch, the version that reloaded both targets under the same rules. It's the Haxe side of
-[hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim).
+branch. That branch holds the version that reloaded both targets under the same rules.
+hotreload-hx is the Haxe side of [hotreload-nim](https://github.com/whirlinggizmo/hotreload-nim).
 
 ## Install
 
-Haxe 4.3 or later, then:
+Requires Haxe 4.3 or later. Install with:
 
 ```bash
 haxelib git hotreload-hx https://github.com/whirlinggizmo/hotreload-hx
 ```
 
-or, from a clone, `haxelib dev hotreload-hx <clone>`. Only Linux is tested so far.
+From a clone, use `haxelib dev hotreload-hx <clone>` instead. Only Linux is tested so far.
 
 Requirements:
 
 - A browser, or node 22.3 or later
-- ES6 output (`-D js-es=6`): `-lib hotreload-hx` sets it, and a hot build set lower stops
-  with a message. To ask for a later version, define it after `-lib hotreload-hx`.
+- ES6 output (`-D js-es=6`). `-lib hotreload-hx` sets it. A hot build set to a lower version
+  stops with a message. To request a later version, define it after `-lib hotreload-hx`.
 
 ## Setting up
 
-hotreload's dev server builds the program hot, serves it, and rebuilds it when a source
-changes. Give it the build's own arguments, such as an hxml:
+The hotreload dev server builds the program hot, serves it, and rebuilds it when a source
+changes. It takes the build's own arguments, such as an hxml:
 
 ```bash
 haxe -lib hotreload-hx --run hotreload.DevServer [--port 8080] [--mount /url=dir] build.web.hxml
@@ -44,9 +44,9 @@ haxe -lib hotreload-hx --run hotreload.DevServer [--port 8080] [--mount /url=dir
 -debug
 ```
 
-The dev server adds `-lib hotreload-hx` and `-D hotreload` to the build, serves its output
-directory at `http://localhost:8080/`, and watches its class paths. The main class drives
-its loop the browser's way:
+The dev server adds `-lib hotreload-hx` and `-D hotreload` to the build. It serves the build's
+output directory at `http://localhost:8080/` and watches the build's class paths. The main
+class drives its loop the browser's way:
 
 ```haxe
 // src/Main.hx
@@ -65,13 +65,13 @@ hotreload: watch: including src/
 hotreload: ready
 ```
 
-Each save to a source is built in the background, and the page takes on the new code
-between two frames. Built without the dev server, the same sources build an ordinary
-program, which is your release build.
+Each save to a source is built in the background. The page takes on the new code between two
+frames. Without the dev server, the same sources build an ordinary program. That program is
+the release build.
 
-The dev server can also be started from a macro, which checks its options as it compiles
-and returns, so one hxml can start it beside other watchers; the compiler waits for it
-after its macros, and it stops with the compiler however that ends:
+The dev server can also be started from a macro. The macro checks its options as it compiles
+and returns, so one hxml can start the server beside other watchers. The compiler waits for
+the server after its macros. The server stops when the compiler ends, however it ends:
 
 ```hxml
 # watch.hxml: haxe watch.hxml
@@ -79,24 +79,23 @@ after its macros, and it stops with the compiler however that ends:
 --macro hotreload.DevServer.serve("build.web.hxml", {port: 8080, mounts: {"/assets": "assets"}})
 ```
 
-`mounts` serves directories besides the build's output, such as assets; the sources it
-watches are the build's own class paths (`-cp`), not its libraries', even in a local
-repository (`haxelib newrepo`'s `.haxelib/`) inside the project (`hotreload: watch:
-excluding` names those). `watch` names more directories to watch, without making them the
-project's: a library's checkout you edit while the program runs, say
-(`watch: ["../helix/src"]`). With
-`background: true`, `serve` returns
-once the server is serving and leaves it running, detached from the terminal, its messages
-in `.hotreload-<port>.log` (or `log`), until it's stopped:
+`mounts` serves directories besides the build's output, such as assets. The watched sources
+are the build's own class paths (`-cp`), not those of its libraries. This holds even for a
+local repository (`haxelib newrepo`'s `.haxelib/`) inside the project. `hotreload: watch:
+excluding` names those. `watch` adds directories to watch without making them part of the
+project, such as a library's checkout edited while the program runs
+(`watch: ["../helix/src"]`). With `background: true`, `serve` returns once the server is
+serving and leaves it running, detached from the terminal, until it is stopped. Its messages
+go to `.hotreload-<port>.log` (or `log`). Stop it with:
 
 ```bash
 haxe -lib hotreload-hx --macro "hotreload.DevServer.stop(8080)"
 ```
 
-Both take their port from `-D hotreload-port=<n>` when they're given none. With
-`restart: true`, `serve` first stops a server this project left on the port (one started
-in its directory); another project's it leaves running, and fails saying whose it is
-(`stop` stops any):
+`serve` and `stop` take their port from `-D hotreload-port=<n>` when none is given. With
+`restart: true`, `serve` first stops a server this project left on the port (one started in
+its directory). A server from another project is left running, and `serve` fails with a
+message naming its owner. `stop` stops a server from any project. For example:
 
 ```hxml
 -lib hotreload-hx
@@ -104,35 +103,36 @@ in its directory); another project's it leaves running, and fails saying whose i
 --macro hotreload.DevServer.serve("build.web.hxml", {background: true, restart: true})
 ```
 
-`sidecars` are commands that run beside the server, each an array of its arguments: started
-once it's serving, and stopped with it however it stops (Ctrl+C, its terminal closed,
-`stop`, a `restart`). An HTTPS proxy in front of it, say, for a phone on the network:
+`sidecars` are commands that run beside the server, each given as an array of its arguments.
+They start once the server is serving. They stop with it, however it stops (Ctrl+C, its
+terminal closed, `stop`, a `restart`). One example is an HTTPS proxy in front of the server,
+for a phone on the network:
 
 ```hxml
 --macro hotreload.DevServer.serve("build.web.hxml", {sidecars: [["docker", "compose", "run", "--rm", "tls"]]})
 ```
 
-A sidecar's standard input is a pipe from the server, closed when the server stops; one that
-doesn't stop when its input closes is killed 3 seconds later. Killing `docker` doesn't stop
-its container, so a container's command should end when its input does (in Compose,
-`stdin_open: true` and, for nginx,
-`command: ["sh", "-c", "nginx -g 'daemon off;' & cat > /dev/null; nginx -s stop"]`). Its
-output goes where the server's does. `haxe -lib hotreload-hx --run hotreload.DevServer --help` lists the server's
+A sidecar's standard input is a pipe from the server, closed when the server stops. A sidecar
+that does not stop when its input closes is killed 3 seconds later. Killing `docker` does not
+stop its container, so a container's command needs to end when its input does. In Compose, set
+`stdin_open: true`. For nginx, also set
+`command: ["sh", "-c", "nginx -g 'daemon off;' & cat > /dev/null; nginx -s stop"]`. A
+sidecar's output goes where the server's does. `haxe -lib hotreload-hx --run hotreload.DevServer --help` lists the server's
 options.
 
 Options:
 
-- `--port <n>`: where it serves, 8080 by default.
-- `--mount /assets=../assets`: serves another directory too, with Range requests.
-- `--watch ../lib/src`: watches another directory's sources too, without making them the
-  project's.
-- `--reload-define <name[=value]>`: a define for reload builds only, for something the first
-  build makes and reloads don't need (a wasm engine the page loads, say).
-- `--no-compilation-server`: builds each reload with a `haxe` of its own.
+- `--port <n>`: the port to serve on. Defaults to 8080.
+- `--mount /assets=../assets`: serves another directory as well, with Range requests.
+- `--watch ../lib/src`: watches another directory's sources as well, without making them part
+  of the project.
+- `--reload-define <name[=value]>`: a define for reload builds only. It is meant for something
+  the first build makes and reloads do not need, such as a wasm engine the page loads.
+- `--no-compilation-server`: builds each reload with a separate `haxe`.
 
-A node program asks `HOTRELOAD_URL` for new builds (`http://localhost:8080/__hotreload` by
-default). `/__hotreload_stop`, from the same machine, stops the dev server and its
-compilation server.
+A node program requests new builds from `HOTRELOAD_URL` (defaults to
+`http://localhost:8080/__hotreload`). A request to `/__hotreload_stop` from the same machine
+stops the dev server and its compilation server.
 
 ### Trying it
 
@@ -143,8 +143,8 @@ cd examples/hello
 haxe dev.hxml
 ```
 
-Open `http://localhost:8080/`. It prints a greeting a few times a second. Change `name`'s
-first value in `src/Hello.hx` and save:
+Open `http://localhost:8080/`. The page prints a greeting a few times a second. Change the
+first value of `name` in `src/Hello.hx` and save:
 
 ```
 Hello, world! (ticks: 12, since the last reload: 12)
@@ -154,30 +154,32 @@ hello: reloaded
 Hello, Rob! (ticks: 16, since the last reload: 1)
 ```
 
-`ticks` is kept, so it keeps counting; `name`'s first value was edited, so it's the new one;
-`sinceReload` is marked `@:resetOnHotReload`, so it starts over. The greeting's first word
-comes from `assets/greeting.txt`; edit it and the next greeting uses it, with nothing
-rebuilt. `haxe build.hxml` is its release build, and its `.vscode/` has a Chrome launch
-configuration for debugging the page while it reloads.
+`ticks` is kept, so it keeps counting. The first value of `name` was edited, so `name` takes
+the new one. `sinceReload` is marked `@:resetOnHotReload`, so it starts over. The greeting's
+first word comes from `assets/greeting.txt`. After an edit to that file, the next greeting
+uses it, with nothing rebuilt. `haxe build.hxml` is the example's release build. Its
+`.vscode/` has a Chrome launch configuration for debugging the page while it reloads.
 
 ## The rules
 
-There are two: *a static keeps its value across a reload, unless you edited its first
-value*, and *a closure made before a reload runs its own code, though what it calls by name
-is new*. There's nothing to mark. The rest of this section is what they mean in practice.
+There are two rules. *A static keeps its value across a reload, unless its first value was
+edited.* *A closure made before a reload runs its own code, but what it calls by name is new.*
+Nothing needs to be marked. The rest of this section describes what the rules mean in
+practice.
 
-### Your code, the main class, and libraries
+### Project code, the main class, and libraries
 
-hotreload tells three kinds of code apart, though only for what it watches and warns about:
+hotreload distinguishes three kinds of code. The distinction applies only to what the dev
+server watches:
 
-- **Your code:** the classes in the project's own class paths (the `-cp` directories inside
-  the project). This is what's watched, and what the build warns about.
-- **The main class:** reloaded like the rest, but its `main` doesn't run again.
+- **Project code:** the classes in the project's own class paths (the `-cp` directories inside
+  the project). This code is watched.
+- **The main class:** reloaded like the rest, but its `main` does not run again.
 - **Libraries:** the standard library and haxelibs, reloaded with the bundle. A library's
-  checkout you edit can be watched too (`watch`).
+  checkout under edit can be watched as well (`watch`).
 
-Every class takes on its new code on a reload, and the rules for statics are the same for
-all of them.
+Every class takes on its new code on a reload. The rules for statics are the same for all of
+them.
 
 ### Statics
 
@@ -188,24 +190,24 @@ static var score = 0;
 static var enemies:Array<Enemy> = [];
 ```
 
-Except:
+Exceptions:
 
-- **Its first value was edited:** it resets to the new one. Change `static var speed = 3.0;`
-  to `4.0`, save, and `speed` is `4.0`, whatever the program had set it to. The first value
-  is compared as written, so an edit elsewhere that changes what it computes (a constant it
-  reads, a function it calls) doesn't reset it.
-- **It's marked `@:resetOnHotReload`:** it resets to its first value on every reload. For
-  what's derived from code, such as a cache or a lookup table, that should be made again by
-  the new code:
+- **Its first value was edited:** it resets to the new one. After `static var speed = 3.0;`
+  is changed to `4.0` and saved, `speed` is `4.0`, whatever value the program had set. The
+  first value is compared as written. An edit elsewhere that changes what it computes (a
+  constant it reads, a function it calls) does not reset it.
+- **It is marked `@:resetOnHotReload`:** it resets to its first value on every reload. This
+  suits values derived from code, such as a cache or a lookup table, for the new code to
+  make again:
 
   ```haxe
   @:resetOnHotReload static var layout = computeLayout();
   ```
 
-- **Its type was changed, and its first value wasn't:** its value is kept when it's still
+- **Its type was changed, and its first value was not:** its value is kept when it is still
   the same kind (number, bool, string, object), and reset otherwise.
 
-A reset is said, but for `@:resetOnHotReload`'s:
+Each reset is reported, except a reset of a `@:resetOnHotReload` static:
 
 ```
 hotreload: static: game.Tuning.speed reset (initial value changed: 3.0 to 4.0)
@@ -213,13 +215,13 @@ hotreload: static: game.State.mode reset (type changed: Int to String)
 hotreload: static: game.State.widened kept (type changed: Int to Float)
 ```
 
-A new static starts from its first value. One with no first value is `null` until the
-program sets it. `@:resetOnHotReload` and the hooks can't be used on an instance field:
-it's a build error. `@:hot`, which marked the statics a reload kept before every static was
-kept, does nothing, and the build warns where it's written.
+A new static starts from its first value. A static with no first value is `null` until the
+program sets it. `@:resetOnHotReload` and the hooks cannot be used on an instance field. Such
+a use is a build error. `@:hot` marked the statics a reload kept, before every static was
+kept. It now does nothing, and the build warns where it is written.
 
 What a static holds survives with it. On each reload, the objects reachable from the statics
-take on the new classes in place, so every reference to them stays good. A new field starts
+take on the new classes in place, so every reference to them stays valid. A new field starts
 from its initializer:
 
 ```haxe
@@ -229,14 +231,14 @@ class Enemy {
 }
 ```
 
-hotreload walks arrays, maps, anonymous structures, classes' objects and enum values
-(made again by constructor name). Shared objects stay shared and cycles stay cycles.
+hotreload walks arrays, maps, anonymous structures, class instances and enum values. Enum
+values are made again by constructor name. Shared objects stay shared, and cycles stay cycles.
 
-An enum constant with no arguments (`Sad`) is the same object across reloads, even where
-the walk doesn't reach, such as in a closure: it still matches its `case` and equals the
-new code's `Sad`, with constructors added or moved before it. A value with arguments
-(`Angry(3)`) the walk doesn't reach can't be updated: when its constructor moves, it
-matches another `case`, and the reload says so:
+An enum constant with no arguments (`Sad`) is the same object across reloads, even where the
+walk does not reach, such as inside a closure. It still matches its `case` and equals the new
+code's `Sad`, even with constructors added or moved before it. A value with arguments
+(`Angry(3)`) that the walk does not reach cannot be updated. When its constructor moves, the
+value matches another `case`, and the reload reports it:
 
 ```
 hotreload: enum: game.Mood.Angry moved (index 2 to 3, unreached values match another case)
@@ -259,7 +261,7 @@ Models.load("ship.obj", file -> loaded(file)); // reaches the newest `loaded`
 
 ### Reload hooks
 
-A class can run code just before a reload (on the old code) and just after (on the new):
+A class can run code just before a reload (on the old code) and just after (on the new code):
 
 ```haxe
 @:beforeHotReload static function saveScratch() { ... }
@@ -280,17 +282,17 @@ The order is: old `@:beforeHotReload` hooks, `beforeReload`, the swap, new
 ### Assets
 
 The dev server watches the files it serves (except the bundle) and tells the program which
-were saved, so it can load them again. Nothing is rebuilt; reloading the asset is up to the
-program:
+ones were saved, so the program can load them again. Nothing is rebuilt. Reloading the asset
+is up to the program:
 
 ```haxe
 var reloader = new hotreload.Reloader();
 reloader.assetsChanged = urls -> for (url in urls) Game.reloadAsset(url);
 ```
 
-`urls` are the files' URLs (`/assets/sounds/fire.ogg`). Deleted files are reported too;
-hidden files and an editor's temporary save files aren't. The callback belongs to the main
-class, so call your code through its class, as above, to reach the new version.
+`urls` are the files' URLs (`/assets/sounds/fire.ogg`). Deleted files are reported too.
+Hidden files and an editor's temporary save files are not. The callback belongs to the main
+class. Call project code through its class, as above, to reach the new version.
 
 ## How a reload works
 
@@ -298,9 +300,9 @@ The program loads the new bundle beside the running one and takes on its classes
 two frames. It keeps everything it made: a wasm engine, GPU state, loaded assets, open
 connections.
 
-- Every class takes on its new code, the main class included, and signature changes need
-  no restart, since every caller reloads too.
-- Statics follow [the rules](#statics): kept, but for an edited first value and
+- Every class takes on its new code, the main class included. Signature changes need no
+  restart, since every caller reloads too.
+- Statics follow [the rules](#statics). They are kept, except for an edited first value and
   `@:resetOnHotReload`.
 - Objects the kept statics hold get the new classes in place. New fields start from their
   initializers, and enum values are rebuilt by constructor name. Enum constants with no
@@ -315,8 +317,8 @@ as the build is done.
 
 ## Debugging
 
-Reloaded code runs at full speed, and the browser's DevTools or VS Code's JavaScript
-debugger work as they do for any Haxe JS build. Build with `-debug` for source maps and set
+Reloaded code runs at full speed. The browser's DevTools and VS Code's JavaScript debugger
+work as they do for any Haxe JS build. Build with `-debug` for source maps and set
 breakpoints in the `.hx` files. Each reloaded bundle has its own source map, so a
 breakpoint also hits in the new code after a reload.
 
@@ -348,11 +350,11 @@ hotreload: enum: game.Mood.Angry moved (index 2 to 3, unreached values match ano
 
 ### Defines
 
-| Define                       | Meaning                                                           |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `-D hotreload`               | a hot build (the dev server adds it)                              |
-| `-D hotreload-port=<n>`      | `serve`'s and `stop`'s port when they're given none (8080 if not) |
-| `-D hotreload_url=<url>`     | where the program asks for new builds                             |
+| Define                       | Meaning                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| `-D hotreload`               | a hot build (the dev server adds it)                                      |
+| `-D hotreload-port=<n>`      | the port for `serve` and `stop` when none is given (defaults to 8080)     |
+| `-D hotreload_url=<url>`     | where the program requests new builds                                     |
 
 Other targets build without hot reload, with a warning.
 
@@ -375,8 +377,8 @@ tests/scale/             reload time by program size, for JS and Nim
 examples/hello/          a page with a reloaded class and an asset
 ```
 
-`python3 tests/behavior/run.py` is the test to run after a change: it exits with 1 when
-something differs from what's expected.
+`python3 tests/behavior/run.py` is the test to run after a change. It exits with 1 when
+something differs from what is expected.
 
 ## License
 

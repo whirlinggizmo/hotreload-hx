@@ -20,61 +20,66 @@ import sys.thread.Thread;
 using StringTools;
 
 /**
-	Hot reload for a JS build: builds it hot, serves it, and rebuilds it when a source
-	changes, and the page (or a node program) loads each new build in place of the
-	running one (Reloader, JsSwap).
+	Provides hot reload for a JS build.
+
+	The dev server builds the project hot, serves it, and rebuilds it when a source changes. The
+	page (or a node program) loads each new build in place of the running one (Reloader, JsSwap).
 
 	```
 	haxe -lib hotreload-hx --run hotreload.DevServer [options] <build arguments>
 	```
 
-	The build arguments are the build's own, an hxml say (`build.web.hxml`); this adds
-	`-D hotreload`. Options:
+	The build arguments are the build's own, such as an hxml (`build.web.hxml`). The dev server
+	adds `-D hotreload`. Options:
 
-	- `--port <n>`: where it serves, 8080 by default
-	- `--mount <url>=<dir>`: serves a directory at a path too, as `--mount /assets=../assets`
-	- `--watch <dir>`: watches a directory's sources too, for a rebuild when one changes,
-	  without making them the project's (a library's checkout being edited, say)
-	- `--reload-define <name[=value]>`: a define for the reload's builds only, not the first:
-	  for something the page loads once, which the first build makes and a reload's needn't
-	  (a wasm engine the page loads, say)
-	- `--no-compilation-server`: builds each reload with a `haxe` of its own
-	- `--stop-with-stdin`: stops when its standard input closes: for a program that starts
-	  it with a pipe there, so it stops when that program does, however that is (`serve`)
-	- `--log <file>`: its messages, and the builds', to the file instead of the terminal
-	- `--sidecar <command>`: a command that runs beside it, started once it's serving and
-	  stopped with it (an HTTPS proxy in front of it, say): a JSON array of its arguments,
-	  `["docker", "compose", "run", "--rm", "tls"]`, or them in one string, split at spaces. Its
-	  standard input is a pipe from this, closed when this stops (however it does): a command
-	  that stops when its input closes stops with it; one that doesn't is killed after 3 s
-	- `--help`: these
+	- `--port <n>`: The port served on. Defaults to 8080.
+	- `--mount <url>=<dir>`: Serves a directory at a path as well, as in `--mount /assets=../assets`.
+	- `--watch <dir>`: Watches a directory's sources as well. A change there triggers a rebuild,
+	  but the sources do not become the project's (for example, a library checkout being edited).
+	- `--reload-define <name[=value]>`: A define for the reload builds only, not the first. It
+	  suits something the page loads once, which the first build makes and a reload build does
+	  not need (for example, a wasm engine the page loads).
+	- `--no-compilation-server`: Builds each reload with a separate `haxe` process.
+	- `--stop-with-stdin`: Stops when standard input closes. A program that starts the server with
+	  a pipe there stops it when that program ends, however it ends (`serve` uses this).
+	- `--log <file>`: Writes the server's messages, and the builds', to the file instead of the
+	  terminal.
+	- `--sidecar <command>`: A command that runs beside the server (for example, an HTTPS proxy in
+	  front of it). It starts once the server is serving and stops with it. The command is a JSON
+	  array of its arguments (`["docker", "compose", "run", "--rm", "tls"]`), or one string split
+	  at spaces. Its standard input is a pipe from the server, closed when the server stops,
+	  however it stops. A command that stops when its input closes stops with the server. One
+	  that does not is killed after 3 s.
+	- `--help`: Prints these options.
 
-	Or from a macro, in an hxml of its own beside others' (a watcher, say):
+	A macro can also start it, from an hxml of its own beside others (for example, a watcher's):
 
 	```
 	-lib hotreload-hx
 	--macro hotreload.DevServer.serve("build.web.hxml", {port: 8064, mounts: {"/assets": "assets"}})
 	```
 
-	`serve` starts it and returns; the compiler waits for it once its macros are done, and
-	it stops with the compiler, Ctrl+C or not. With `background: true` it keeps running
-	after the compiler, its messages in a log, until it's stopped:
+	`serve` starts the server and returns. The compiler waits for it once its macros are done,
+	and the server stops with the compiler, by Ctrl+C or otherwise. With `background: true`, the
+	server keeps running after the compiler, with its messages in a log, until it is stopped:
 
 	```
 	haxe -lib hotreload-hx --macro "hotreload.DevServer.stop(8064)"
 	```
 
-	It serves the build's output directory at `/`, with Range requests (an engine may
-	stream assets), and `/__hotreload`, which says what the latest build is (with `?since=<n>`, once there's
-	one newer than n). `/__hotreload_assets` says which served files changed (with `?since=<n>`, the
-	same way), `/__hotreload_project` says the directory it was started in, and
-	`/__hotreload_stop`, asked from this machine, stops it. Ten times a
-	second it checks the project's sources for changes: the build's class paths inside its
-	directory (`-cp`), or else the main class's directory, and below, and its hxml files.
-	Once they've stopped changing, it rebuilds from the hxml as it is then (a `-lib` or a
-	`-cp` added is built with, and a class path watched), through a compilation server it starts, and the page, which is
-	waiting to hear of it, loads it. Compiler errors go to this terminal (or the log), and
-	the page keeps running what it has.
+	The server serves the build's output directory at `/`, with Range requests (an engine may
+	stream assets). `/__hotreload` reports the latest build. With `?since=<n>`, it answers once a
+	build newer than n exists. `/__hotreload_assets` reports which served files changed, with
+	`?since=<n>` the same way. `/__hotreload_project` reports the directory the server was started
+	in. `/__hotreload_stop` stops the server, and is accepted only from this machine.
+
+	Ten times a second, the server checks the project's sources for changes. The sources are the
+	build's class paths inside its directory (`-cp`), or else the main class's directory, with
+	their subdirectories, plus the build's hxml files. Once they stop changing, the server rebuilds
+	from the hxml as it is then. A `-lib` or `-cp` added to it is used, and an added class path is
+	watched. The rebuild goes through a compilation server the dev server starts, and the page,
+	which waits to hear of it, loads it. Compiler errors go to this terminal (or the log), and the
+	page keeps running the build it has.
 **/
 class DevServer {
 	static inline var HELP = "usage: haxe -lib hotreload-hx --run hotreload.DevServer [options] <build arguments>
@@ -97,25 +102,39 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 (options: port, mounts, watch, reloadDefines, compilationServer, sidecars, background, log, restart); stopped with
 --macro hotreload.DevServer.stop(8064).";
 
-	/** how often the sources are checked: a check is a directory walk, cheap at this size **/
+	/**
+		The interval between source checks, in seconds.
+
+		A check is a directory walk, which is cheap at this size.
+	**/
 	static inline var CHECK_INTERVAL = 0.1;
 
 	static var port = 8080;
 	static var mounts = new Map<String, String>();
 	static var reloadDefines = new Array<String>();
 
-	/** directories watched besides the project's (`--watch`): a rebuild when they change, but not the project's code **/
+	/**
+		The directories watched besides the project's (`--watch`).
+
+		A change in one triggers a rebuild, but its sources are not treated as the project's code.
+	**/
 	static var watched = new Array<String>();
 	static var root:String;
 
-	/** the directory it was started in: its project, which a restart (serve's) checks is the same **/
+	/**
+		The directory the server was started in, which is its project.
+
+		A restart (`serve`'s) checks that it matches.
+	**/
 	static var project = Path.removeTrailingSlashes(Path.normalize(Sys.getCwd()));
 	static var bundleUrl:String;
 	static var config:Builder.JsConfig;
 
 	/**
-		the build's arguments, as given, and the directory they're from: every build reads
-		its hxml again, so an edited one (a -lib added, a -cp) is what the next is built from
+		The build's arguments, as provided, and the directory they are relative to.
+
+		Every build reads its hxml again, so the next build uses an edited one (a -lib or -cp
+		added).
 	**/
 	static var build:Array<String>;
 
@@ -124,21 +143,29 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	static var failed = false;
 	static var lock = new Mutex();
 
-	/** where its messages go: the terminal, or a file (--log) **/
+	/** The log file for the server's messages (`--log`), or null for the terminal. **/
 	static var log:sys.io.FileOutput;
 
 	static var logLock = new Mutex();
 
-	/** the served files' changes: each settled batch a version, its URLs (/__hotreload_assets) **/
-	/** cleared by a stop (/__hotreload_stop), which ends the watchers' loops and the serving one **/
+	/**
+		Gets or sets a value indicating whether the server is running.
+
+		A stop (`/__hotreload_stop`) clears it, which ends the watchers' loops and the serving loop.
+	**/
 	static var running = true;
 
-	/** the long polls being held, each answered once it can be, or its time is up, or there's a stop **/
+	/**
+		The long polls being held.
+
+		Each is answered once its condition is met, its time is up, or the server stops.
+	**/
 	static var waiting = new Array<{ready:() -> Bool, end:Float, answer:() -> Void}>();
 
 	/**
-		the commands run beside it (--sidecar), and those running: on the serving loop, which
-		starts them and, once it's stopping, stops them, before it lets the process end
+		The commands run beside the server (`--sidecar`), and the ones running.
+
+		The serving loop starts them. When it stops, it stops them before it lets the process end.
 	**/
 	static var sidecars = new Array<Array<String>>();
 
@@ -146,6 +173,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	static var sidecarsStopped = new sys.thread.Lock();
 
 	static var assetVersion = 0;
+
+	/** The served files' changes, with one version per settled batch and its URLs (`/__hotreload_assets`). **/
 	static var assetChanges = new Array<{version:Int, urls:Array<String>}>();
 
 	static function main() {
@@ -179,7 +208,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 					Sys.println(HELP);
 					Sys.exit(0);
 				case "--stop-with-stdin":
-					// the pipe's other end closes when its program ends, killed or not, on every system
+					// The pipe's other end closes when its program ends, killed or not, on every system.
 					Thread.create(() -> {
 						try {
 							while (true)
@@ -197,11 +226,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			Sys.exit(1);
 		}
 
-		// the first build: hot, and saying how it was made
-		// (in the system's temporary directory: one a stopped build leaves is not left in the project)
+		// The first build is hot and writes a config file that describes it. The file is in the
+		// system's temporary directory, so one a stopped build leaves is not left in the project.
 		var configFile = Path.join([tempDir(), "hotreload-" + Std.random(1 << 30) + ".json"]);
 		say("hotreload: build: started");
-		// with the library, whether the build names it or not
+		// The library is added whether the build names it or not.
 		var code = runHaxe(build.concat(["-lib", "hotreload-hx", "-D", "hotreload", "-D", 'hotreload_config=$configFile']));
 		if (code != 0 || !FileSystem.exists(configFile)) {
 			if (FileSystem.exists(configFile))
@@ -214,9 +243,10 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		root = Path.directory(config.js);
 		bundleUrl = "/" + Path.withoutDirectory(config.js);
 
-		// the port first: if it's taken there's nothing to serve, and saying so beats a page that never loads.
-		// libuv's (eval.luv's): its bind reuses the address, so a restart needn't wait out the
-		// last run's closed connections, and it says when it fails (sys.net.Socket does neither on eval)
+		// The port comes first. If it is taken, there is nothing to serve, and an error beats a page
+		// that never loads. The socket is libuv's (eval.luv's). Its bind reuses the address, so a
+		// restart does not wait out the last run's closed connections, and it reports a failure.
+		// sys.net.Socket does neither on eval.
 		var loop = Loop.init().resolve();
 		var server = Tcp.init(loop).resolve();
 		var failure:String = null;
@@ -224,7 +254,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			case Error(e): failure = e.toString();
 			case Ok(_):
 		}
-		// libuv tells a bind's address in use at the listen
+		// libuv reports a bind's address in use at the listen.
 		if (failure == null)
 			Stream.listen(server, result -> switch (result) {
 				case Error(e): failure = e.toString();
@@ -242,9 +272,9 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		sayWatch();
 		Thread.create(watchAssets);
 		watch(compilationServer);
-		// (the serving loop stops them as it stops, a few seconds at most)
+		// The serving loop stops the sidecars as it stops, in a few seconds at most.
 		sidecarsStopped.wait(5);
-		// the compilation server's shell sees this process go, and stops it
+		// The compilation server's shell sees this process end, and stops the compilation server.
 		say("hotreload: stopped");
 		Sys.exit(0);
 	}
@@ -253,7 +283,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	static var macroLoop:Loop;
 	static var macroExit = 0;
 
-	/** serve's and stop's port when they're given none: `-D hotreload-port=<n>`, or 8080, so an hxml says it once **/
+	/**
+		Returns the port for `serve` and `stop` when none is provided.
+
+		The port is `-D hotreload-port=<n>`'s, or 8080 if it is omitted, so an hxml states it once.
+	**/
 	static function macroPort():Int {
 		var defined = haxe.macro.Context.definedValue("hotreload-port");
 		var port = defined == null ? null : Std.parseInt(defined);
@@ -263,21 +297,26 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	}
 
 	/**
-		Starts it from a macro, `--macro hotreload.DevServer.serve(...)`, with the build's
-		arguments (an hxml, say) and the options above, and returns, so the hxml's other
-		macros run too; once they're done, the compiler waits for it. It stops with the
-		compiler: its standard input is a pipe from it (`--stop-with-stdin`). Its port is
-		`port`, or else `-D hotreload-port=<n>`'s, or 8080. With `restart: true`, a dev
-		server this project left on the port (one started in this directory) is stopped
-		first; another project's isn't, and this fails saying whose it is. `sidecars` are
-		commands run beside it, each an array of its arguments (`--sidecar`): started once
-		it's serving, and stopped with it, however it stops. `watch` names directories
-		whose sources are watched too, without being the project's (`--watch`).
+		Starts the dev server from a macro, as in `--macro hotreload.DevServer.serve(...)`.
 
-		With `background: true`, it returns once the server is serving (or fails as it
-		does), and the server keeps running after the compiler, detached from this terminal,
-		so Ctrl+C here and closing it leave it be; its messages go to `log` (`.hotreload-<port>.log` by default), and `stop(port)`
-		stops it.
+		The call returns at once, so the hxml's other macros run too. Once they are done, the
+		compiler waits for the server. The server stops with the compiler, because its standard
+		input is a pipe from it (`--stop-with-stdin`).
+
+		With `restart: true`, a dev server this project left on the port (one started in this
+		directory) is stopped first. Another project's is not, and the call fails with an error
+		that names its directory.
+
+		With `background: true`, the call returns once the server is serving, or fails as the
+		server does. The server keeps running after the compiler, detached from this terminal, so
+		Ctrl+C here and closing the terminal leave it running. Its messages go to `log`, and
+		`stop(port)` stops it.
+
+		@param build  The build's arguments: an hxml, or an array of arguments.
+		@param options  Optional. `port` defaults to `-D hotreload-port=<n>`'s, or 8080.
+		`mounts`, `watch`, `reloadDefines`, `compilationServer` and `sidecars` match the
+		command-line options. Each sidecar is an array of its arguments. `log` defaults to
+		`.hotreload-<port>.log`.
 	**/
 	public static function serve(build:haxe.extern.EitherType<String, Array<String>>, ?options:{
 		?port:Int,
@@ -314,8 +353,9 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		var logFile = null;
 		if (background) {
 			logFile = FileSystem.absolutePath(options.log != null ? options.log : '.hotreload-$port.log');
-			// a last run's says nothing of this one. Windows won't let go of a running server's: one just stopped (stop(), just
-			// before) may take a moment to end, past that it's still running
+			// A last run's log says nothing about this one, so it is deleted. Windows does not release a
+			// running server's log. One just stopped (by stop(), just before) may take a moment to end.
+			// Past that, it is still running.
 			var tries = 0;
 			while (FileSystem.exists(logFile))
 				try {
@@ -337,14 +377,16 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		var loop = background ? Loop.init().resolve() : foregroundLoop();
 		var pipe = eval.luv.Pipe.init(loop).resolve();
 		var stdin = eval.luv.Process.toParentPipe(eval.luv.Process.stdin, pipe, true, false, false);
-		// in the background, detached: a session of its own (Unix), no console and out of libuv's job, which would end it
-		// with the compiler (Windows); so this terminal's Ctrl+C and closing it leave it be. Its builds start hidden (--log)
+		// In the background, the server is detached. On Unix, it gets a session of its own. On
+		// Windows, it gets no console and leaves libuv's job, which would end it with the compiler.
+		// This terminal's Ctrl+C and closing it leave it running. Its builds start hidden (--log).
 		var redirect = background ? [stdin] : [
 			stdin,
 			eval.luv.Process.inheritFd(eval.luv.Process.stdout, 1),
 			eval.luv.Process.inheritFd(eval.luv.Process.stderr, 2)
 		];
-		// nor this one's stdout and stderr, which Windows would hand it: whatever reads them (an editor's task) would wait for it
+		// It does not inherit this process's stdout and stderr, which Windows would hand it.
+		// Whatever reads them (an editor's task) would wait for it.
 		if (background)
 			eval.luv.Process.disableStdioInheritance();
 		var exited = false;
@@ -368,7 +410,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		if (!background)
 			return;
 
-		// once it's serving, or it's failed: its messages so far, here
+		// Once the server is serving, or has failed, its messages so far are printed here.
 		var said = "";
 		while (true) {
 			loop.run(NOWAIT);
@@ -382,16 +424,17 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		if (exited)
 			Sys.exit(macroExit != 0 ? macroExit : 1);
 		Sys.println('hotreload: background: log in $logFile; to stop it: haxe -lib hotreload-hx --macro "hotreload.DevServer.stop($port)"');
-		// the process goes on without this: only the handles are let go
+		// The process continues without this one. Only the handles are released.
 		Handle.close(pipe, () -> {});
 		Handle.close(process, () -> {});
 		loop.run(NOWAIT);
 	}
 
 	/**
-		the loop the processes the macros start run on in this terminal: once the hxml's
-		macros are done, the compiler runs it until they've all ended, and fails as the
-		server did, as the hxml with --run did
+		Returns the loop that the processes the macros start run on in this terminal.
+
+		Once the hxml's macros are done, the compiler runs the loop until all of them have ended.
+		The compiler then fails if the server failed, as an hxml with --run does.
 	**/
 	static function foregroundLoop():Loop {
 		if (macroLoop == null) {
@@ -406,9 +449,13 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	}
 
 	/**
-		Stops the dev server serving on this machine's port (`/__hotreload_stop`), as
-		`--macro hotreload.DevServer.stop(8064)`: one `serve` left in the background, say.
-		Nothing serving there is fine, so an hxml can stop a last run's before its `serve`.
+		Stops the dev server serving on a port of this machine (`/__hotreload_stop`).
+
+		A typical use is `--macro hotreload.DevServer.stop(8064)`, for one `serve` left in the
+		background. A port with nothing serving is not an error, so an hxml can stop a last run's
+		server before its `serve`.
+
+		@param port  Optional. Defaults to `-D hotreload-port=<n>`'s, or 8080.
 	**/
 	public static function stop(?port:Int) {
 		if (port == null)
@@ -420,7 +467,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		}
 		if (answer != "stopping")
 			haxe.macro.Context.fatalError('hotreload: stop: port $port is not served by a dev server', haxe.macro.Context.currentPos());
-		// gone once the port is free
+		// The server is gone once the port is free.
 		for (_ in 0...100) {
 			if (ask(port, null) == null) {
 				Sys.println('hotreload: stop: done (port $port)');
@@ -431,7 +478,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		haxe.macro.Context.fatalError('hotreload: stop: failed (the dev server on port $port is still serving)', haxe.macro.Context.currentPos());
 	}
 
-	/** restart's stop: the server on the port stopped if it's this project's (started in this directory), left be if not **/
+	/**
+		Stops the server on the port for a restart, if it is this project's (started in this directory).
+
+		Another project's server is left running, and the build fails with an error.
+	**/
 	static function stopOwn(port:Int) {
 		var answer = ask(port, "/__hotreload_project");
 		if (answer == null)
@@ -452,9 +503,12 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	}
 
 	/**
-		The body of a GET of path from this machine's port, or null if nothing serves
-		there; one not answered 200 is its status line. With no path, only whether
-		something serves (null or "").
+		Returns the body of a GET of a path from a port of this machine.
+
+		A response other than 200 gives its status line instead of the body.
+
+		@param path  The path to request. With null, only whether something serves is checked.
+		@return  The body or status line, "" for a null path, or null if nothing serves there.
 	**/
 	static function ask(port:Int, path:Null<String>):Null<String> {
 		var socket = new Socket();
@@ -483,11 +537,12 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 
 	static function watch(compilationServer:String) {
 		var sourceWatch = new FileWatch(sources);
-		// (after the sources' first stamps: a save from here on is a change. What a script waits for)
+		// This follows the sources' first stamps, so a save from here on is a change.
+		// A script waits for this message.
 		say("hotreload: ready");
 		while (running) {
 			Sys.sleep(CHECK_INTERVAL);
-			// a build starts once the sources have stopped changing (FileWatch)
+			// A build starts once the sources have stopped changing (FileWatch).
 			var paths = sourceWatch.check();
 			if (paths != null && rebuild(paths, compilationServer))
 				sourceWatch.relist();
@@ -495,9 +550,10 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	}
 
 	/**
-		The served files (the output directory's and the mounts'), but the bundle: a saved
-		one, once its save has settled, is told to the page by its URL, which loads it again
-		in place. Nothing is built
+		Watches the served files (the output directory's and the mounts'), excluding the bundle.
+
+		Once a save settles, the page receives each saved file's URL and loads the file again in
+		place. Nothing is built.
 	**/
 	static function watchAssets() {
 		var assetWatch = new FileWatch(served);
@@ -514,7 +570,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		}
 	}
 
-	/** every served file, by its URL, and its path **/
+	/** Returns every served file's path, by its URL. **/
 	static function served():Map<String, String> {
 		var result = new Map<String, String>();
 		var bundle = Path.normalize(FileSystem.absolutePath(config.js));
@@ -535,7 +591,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		return result;
 	}
 
-	/** the system's directory for temporary files: TMPDIR, TEMP or TMP, or /tmp **/
+	/** Returns the system's directory for temporary files: TMPDIR, TEMP or TMP, or else /tmp. **/
 	static function tempDir():String {
 		for (name in ["TMPDIR", "TEMP", "TMP"]) {
 			var dir = Sys.getEnv(name);
@@ -545,7 +601,10 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		return FileSystem.exists("/tmp") ? "/tmp" : Sys.getCwd();
 	}
 
-	/** the directories watched, and the class paths in the project left out (its local repository's libraries) **/
+	/**
+		Reports the directories watched, and the class paths in the project that are excluded (its
+		local repository's libraries).
+	**/
 	static function sayWatch() {
 		say('hotreload: watch: including ${[for (d in config.dirs.concat(watched)) relative(d) + "/"].join(", ")}');
 		var excluded = config.excluded == null ? [] : config.excluded;
@@ -553,15 +612,19 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			say('hotreload: watch: excluding ${[for (d in excluded) relative(d) + "/"].join(", ")} (libraries in the project\'s .haxelib/)');
 	}
 
-	/** a build, of the changed files; whether the directories watched changed with it **/
+	/**
+		Builds again for the changed files.
+
+		@return  Whether the directories watched changed with the build.
+	**/
 	static function rebuild(changed:Array<String>, compilationServer:String):Bool {
 		say('hotreload: build: started (${[for (p in changed) relative(p)].join(", ")})');
 		var start = haxe.Timer.stamp();
 		lock.acquire();
 		var next = version + 1;
 		lock.release();
-		// the changed sources through a file, whose path (a define) is the same each build, as
-		// is the one the build says how it was made in
+		// The changed sources go through a file whose path (a define) is the same each build. The
+		// config file the build describes itself in has a fixed path too.
 		var list = Path.join([Path.directory(config.js), ".hotreload-changed"]);
 		File.saveContent(list, [for (p in changed) if (p.endsWith(".hx")) p].join("\n"));
 		var configFile = Path.join([Path.directory(config.js), ".hotreload-config.json"]);
@@ -572,7 +635,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		if (compilationServer != null)
 			args = ["--connect", compilationServer].concat(args);
 		var code = runHaxe(args);
-		// its class paths, which an edited hxml may have changed: the ones watched from now on
+		// An edited hxml may have changed the class paths. The new ones are watched from now on.
 		var relisted = false;
 		if (code == 0 && FileSystem.exists(configFile)) {
 			var made:Builder.JsConfig = try haxe.Json.parse(File.getContent(configFile)) catch (_) null;
@@ -599,16 +662,22 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 	}
 
 	/**
-		A build's number, on its bundle's first line, for the bundle to know which it is
-		(JsSwap). On the line Haxe's comment is on, so no line moves, and a define whose
-		value changed each build would give the compilation server a new context each time
+		Writes a build's number on its bundle's first line, so the bundle knows which build it is
+		(JsSwap).
+
+		The number goes on the line Haxe's comment is on, so no line moves. A define is not used,
+		because a value that changed each build would give the compilation server a new context
+		each time.
 	**/
 	static function stamp(n:Int) {
 		var js = File.getContent(config.js);
 		File.saveContent(config.js, 'globalThis.__hotreload_built = $n; ' + js);
 	}
 
-	/** the .hx files in the watched directories (the project's, and `--watch`'s) and below **/
+	/**
+		Returns the .hx files in the watched directories (the project's, and `--watch`'s) and their
+		subdirectories, and the build's hxml files.
+	**/
 	static function sources():Map<String, String> {
 		var result = new Map<String, String>();
 		function walk(dir:String) {
@@ -627,7 +696,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		return result;
 	}
 
-	/** the build's hxml files, and the ones they name, read from where the build starts **/
+	/** Returns the build's hxml files, and the ones they name, resolved from the build's directory. **/
 	static function hxmlFiles():Array<String> {
 		var result = [];
 		function add(file:String) {
@@ -652,9 +721,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		socket.bind(new Host("127.0.0.1"), 0);
 		var address = "127.0.0.1:" + socket.host().port;
 		socket.close();
-		// in a shell that stops it when this stops, however that is (as the Reloader's)
+		// The server runs in a shell that stops it when this process stops, however it stops
+		// (as the Reloader's does).
 		if (Sys.systemName() == "Windows")
-			// no sh: this again, whose stdin, a pipe from this, closes when this ends
+			// Windows has no sh. This program runs again instead, and its stdin, a pipe from this one,
+			// closes when this ends.
 			new Process("haxe", ["-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--compilation-server", address]);
 		else
 			new Process("sh", [
@@ -664,7 +735,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 				"sh",
 				address
 			]);
-		// ready once it takes a connection
+		// The server is ready once it accepts a connection.
 		for (_ in 0...100) {
 			var probe = new Socket();
 			try {
@@ -680,7 +751,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		return null;
 	}
 
-	/** `haxe --wait address` until stdin closes: the dev server's compilation server on Windows **/
+	/** Prints a message to the terminal, or to the log (`--log`). **/
 	static function say(message:String) {
 		if (log == null) {
 			Sys.println(message);
@@ -692,12 +763,16 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		logLock.release();
 	}
 
-	/** haxe with these arguments, its messages to the terminal, or to the log (--log) **/
+	/**
+		Runs haxe with the arguments, and passes its messages to the terminal, or to the log (--log).
+
+		@return  The exit code.
+	**/
 	static function runHaxe(args:Array<String>):Int {
-		// its output passed on a line at a time, as it comes: not Sys.command, whose child's
-		// stderr (the compiler's warnings and errors) `haxe --run` holds until this ends
+		// The output is passed on a line at a time, as it comes. Sys.command is not used, because
+		// `haxe --run` holds its child's stderr (the compiler's warnings and errors) until this ends.
 		var p = new Process("haxe", args);
-		// both read at once: a full pipe would stall the compiler
+		// Both streams are read at once, because a full pipe would stall the compiler.
 		var read = new sys.thread.Lock();
 		Thread.create(() -> {
 			passOn(p.stderr, Sys.stderr());
@@ -710,7 +785,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		return code;
 	}
 
-	/** a build's output, line by line, to the same stream of this (or the log) **/
+	/** Passes a build's output, line by line, to the same stream of this process (or to the log). **/
 	static function passOn(input:haxe.io.Input, output:haxe.io.Output) {
 		try {
 			while (true) {
@@ -725,6 +800,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		} catch (_:haxe.io.Eof) {}
 	}
 
+	/**
+		Runs `haxe --wait address` until stdin closes.
+
+		This is the dev server's compilation server on Windows.
+	**/
 	static function compilationServerUntilStdinCloses(address:String) {
 		var server = new Process("haxe", ["--wait", address]);
 		try {
@@ -737,7 +817,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 
 	// --- serving ---
 
-	/** runs the loop: its connections, and a check of the held long polls a hundred times a second **/
+	/** Runs the serving loop: its connections, and a check of the held long polls a hundred times a second. **/
 	static function serveRequests(loop:Loop, server:Tcp) {
 		startSidecars(loop);
 		var stopping = -1.0;
@@ -750,7 +830,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 					w.answer();
 				}
 			if (!running) {
-				// the sidecars told to stop (their input closed), and any still running after 3 s killed
+				// The sidecars are told to stop by closing their input. Any still running after 3 s is killed.
 				if (stopping < 0) {
 					stopping = now;
 					for (s in sidecarsRunning)
@@ -758,7 +838,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 				}
 				if (sidecarsRunning.length > 0 && now < stopping + 3)
 					return;
-				// (by its pid: Haxe 4.3's Process.kill isn't there)
+				// The kill is by pid, because Haxe 4.3 has no Process.kill.
 				for (s in sidecarsRunning)
 					eval.luv.Process.killPid(s.process.pid(), SIGKILL);
 				sidecarsStopped.release();
@@ -770,7 +850,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		loop.run(DEFAULT);
 	}
 
-	/** each sidecar started: its output to the terminal, or the log; its failing said **/
+	/** Starts each sidecar, with its output to the terminal or the log. A failure is reported. **/
 	static function startSidecars(loop:Loop) {
 		for (command in sidecars) {
 			var name = command.join(" ");
@@ -823,7 +903,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			Handle.close(client, () -> {});
 			return;
 		}
-		// the request: its line and headers, up to the blank line (a GET has no body)
+		// The request is its line and headers, up to the blank line (a GET has no body).
 		var head = new StringBuf();
 		Stream.readStart(client, result -> switch (result) {
 			case Ok(data):
@@ -851,8 +931,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		var parts = request.split(" ");
 		var path = StringTools.urlDecode(parts[1].split("?")[0]);
 		if (path == "/__hotreload") {
-			// ?since=<version>: held until there's a newer build (or a while passes), so a
-			// page hears of one as soon as it's built rather than at its next question
+			// With ?since=<version>, the answer is held until a newer build exists (or a while passes). A
+			// page then hears of a build as soon as it is built, rather than at its next request.
 			var since = Std.parseInt(parts[1].indexOf("since=") >= 0 ? parts[1].split("since=")[1].split("&")[0] : "");
 			hold(since == null ? null : () -> {
 				lock.acquire();
@@ -868,7 +948,8 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			return;
 		}
 		if (path == "/__hotreload_stop" || path == "/__hotreload_project") {
-			// from this machine only: a page elsewhere has no business stopping it, or knowing where it runs
+			// These are accepted from this machine only. A page elsewhere must not stop the server,
+			// or learn where it runs.
 			var peer = switch (client.getPeerName()) {
 				case Ok(addr): addr.toString();
 				case Error(_): "";
@@ -881,13 +962,13 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 				send(client, 200, "text/plain", haxe.io.Bytes.ofString(project));
 				return;
 			}
-			// once it's said: the watchers' loops end, and this one's check closes the server
+			// Once the answer is sent, the watchers' loops end, and this loop's check closes the server.
 			send(client, 200, "text/plain", haxe.io.Bytes.ofString("stopping"), () -> running = false);
 			return;
 		}
 		if (path == "/__hotreload_assets") {
-			// ?since=<version>: held until files newer than it have changed (or a while
-			// passes); -1 answers at once with the current version, to start from
+			// With ?since=<version>, the answer is held until files have changed after that version (or a
+			// while passes). With -1, it answers at once with the current version, to start from.
 			var since = Std.parseInt(parts[1].indexOf("since=") >= 0 ? parts[1].split("since=")[1].split("&")[0] : "");
 			hold(since == null || since < 0 ? null : () -> {
 				lock.acquire();
@@ -928,7 +1009,12 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		send(client, 200, mime(file), data);
 	}
 
-	/** a long poll's answer: at once without a condition, or held (by serve's check) until it's met, for up to 20 s **/
+	/**
+		Answers a long poll.
+
+		Without a condition, the answer is sent at once. Otherwise it is held (by the serving loop's
+		check) until the condition is met, for up to 20 s.
+	**/
 	static function hold(ready:Null<() -> Bool>, answer:() -> Void) {
 		if (ready == null || ready())
 			answer();
@@ -936,7 +1022,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 			waiting.push({ready: ready, end: haxe.Timer.stamp() + 20, answer: answer});
 	}
 
-	/** a request's file: under a mount, or the output directory, and never outside it **/
+	/**
+		Returns a request's file, under a mount or the output directory, and never outside it.
+
+		@return  The file's path, or null if there is none.
+	**/
 	static function resolve(path:String):Null<String> {
 		var base = root;
 		var rest = path;
@@ -953,7 +1043,7 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		return FileSystem.exists(file) ? file : null;
 	}
 
-	/** a response, and then the connection closed (and `sent` called) once it's written **/
+	/** Sends a response, then closes the connection (and calls `sent`) once it is written. **/
 	static function send(client:Tcp, status:Int, type:String, body:haxe.io.Bytes, ?extra = "", ?sent:() -> Void) {
 		var reason = switch (status) {
 			case 200: "OK";
@@ -990,7 +1080,11 @@ From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064,
 		}
 	}
 
-	/** a path from the build's directory, for messages: `../lib/Lib.hx` for one beside it; as it is on another drive **/
+	/**
+		Returns a path relative to the build's directory, for messages.
+
+		A file in a sibling directory gives `../lib/Lib.hx`. A path on another drive is unchanged.
+	**/
 	static function relative(path:String):String {
 		if (path.startsWith(config.cwd))
 			return path.substr(config.cwd.length);

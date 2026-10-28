@@ -1,8 +1,10 @@
 package hotreload;
 
 /**
-	What a reload calls: the running code's `@:beforeHotReload` and `@:afterHotReload`
-	hooks, which their classes' static initializers add (as the macro makes them)
+	Provides the reload hooks that a reload calls.
+
+	The hooks are the running code's `@:beforeHotReload` and `@:afterHotReload` functions.
+	Their classes' static initializers add them, as the build macro generates them.
 **/
 @:keep
 class Hooks {

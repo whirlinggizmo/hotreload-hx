@@ -5,28 +5,29 @@ import sys.FileSystem;
 import sys.io.File;
 
 /**
-	Files watched for saves, checked a few times a second: once some have changed, and a
-	check finds nothing more changing (a save can touch a file twice, or several files),
-	`check` gives the batch. The reloaders' sources and assets, and the DevServer's, are
-	each one of these.
+	Represents a set of files watched for saves.
 
-	`list` names the files: each by its key, as `check` gives it (a path, or the URL a file
-	is served at), and its path on disk.
+	The files are checked a few times a second. Once some have changed, and a check finds
+	nothing more changing, `check` returns the batch. A save can touch a file twice, or touch
+	several files. The reloaders' sources and assets, and the DevServer's, each use one of these.
+
+	`list` names the files. Each has a key, as `check` returns it (a path, or the URL a file is
+	served at), and a path on disk.
 **/
 class FileWatch {
-	/** how many quiet checks an empty file is waited out for **/
+	/** The number of quiet checks an empty file is waited out for. **/
 	static inline var EMPTY_WAIT = 5;
 
 	var list:() -> Map<String, String>;
 	var stamps:Map<String, Stamp>;
 
-	/** the files, by key, that changed since the batch started, and the stamps it started from **/
+	/** The files, by key, that changed since the batch started, and the stamps it started from. **/
 	var changed = new Array<String>();
 
 	var before:Map<String, Stamp>;
 	var settling = false;
 
-	/** checks in a row that found nothing changing, while a batch settles **/
+	/** The number of checks in a row that found nothing changing, while a batch settles. **/
 	var quiet = 0;
 
 	public function new(list:() -> Map<String, String>) {
@@ -35,8 +36,10 @@ class FileWatch {
 	}
 
 	/**
-		the files the list has gained or lost (a directory watched from now on, or not),
-		taken as they are: not changes
+		Takes in the files the list has gained or lost (a directory watched from now on, or no
+		longer watched).
+
+		They are stamped as they are and not reported as changes.
 	**/
 	public function relist() {
 		var current = stampAll();
@@ -48,7 +51,11 @@ class FileWatch {
 				stamps.remove(key);
 	}
 
-	/** what changed, by key, once a batch has settled; null before then **/
+	/**
+		Checks the files for changes.
+
+		@return  The keys of the files that changed, once a batch has settled, or null before then.
+	**/
 	public function check():Null<Array<String>> {
 		var current = stampAll();
 		var any = false;
@@ -73,8 +80,8 @@ class FileWatch {
 		}
 		if (!settling)
 			return null;
-		// an empty file is one being saved (truncated, then written): wait for it, but not
-		// for long, as a save takes moments and a file can be emptied on purpose
+		// An empty file is one being saved (truncated, then written). The check waits for it, but
+		// not for long, because a save takes moments and a file can be emptied on purpose.
 		quiet++;
 		if (quiet < EMPTY_WAIT)
 			for (key in changed)
@@ -82,7 +89,7 @@ class FileWatch {
 					return null;
 		settling = false;
 		quiet = 0;
-		// a file made and gone within the batch (an editor's temporary one) was never there
+		// A file made and deleted within the batch (an editor's temporary one) is ignored.
 		var batch = [for (key in changed) if (current.exists(key) || before.exists(key)) key];
 		changed = [];
 		before = null;
@@ -102,10 +109,12 @@ class FileWatch {
 }
 
 /**
-	When a file last changed. A file's time is in whole seconds, so two saves in one
-	second, the same size, would look like one: a file changed in the last few seconds
-	has its contents' hash too, if it's small enough to read that often (a source, a
-	shader, a level; a large asset is written by a tool, not saved twice in a second)
+	Represents when a file last changed.
+
+	A file's time is in whole seconds, so two saves of the same size in one second would look
+	like one. A file changed in the last few seconds also has its contents' hash, if it is
+	small enough to read that often (a source, a shader, a level). A large asset is written by
+	a tool, not saved twice in a second.
 **/
 private class Stamp {
 	static inline var HASH_LIMIT = 1 << 20;
