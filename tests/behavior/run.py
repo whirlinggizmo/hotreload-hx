@@ -31,7 +31,7 @@ it runs, and its builds. It checks the rules for statics:
 - built through a compilation server, from its cache, into an output directory that isn't
   there yet, the program builds without false warnings.
 
-    python3 tests/parity/run.py
+    python3 tests/behavior/run.py
 
 It exits with 1 when something differs from what's expected.
 """
@@ -139,8 +139,8 @@ def own():
     own files (there should be none), or the errors it failed with"""
     print("\n== hotreload-hx's src/ as a project class path")
     root = os.path.normpath(os.path.join(HERE, "..", ".."))
-    output = ["--js", "tests/parity/out/own/main.js"]
-    r = subprocess.run(["haxe", "-cp", "src", "-cp", "tests/parity/order", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload",
+    output = ["--js", "tests/behavior/out/own/main.js"]
+    r = subprocess.run(["haxe", "-cp", "src", "-cp", "tests/behavior/order", "-lib", "hotreload-hx", "--main", "Main", "-D", "hotreload",
                         "--no-output"] + output, cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
         lines = [l.strip() for l in r.stderr.splitlines() if "Warning" not in l]

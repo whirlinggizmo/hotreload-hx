@@ -342,13 +342,13 @@ src/hotreload/
   DevServer.hx           building, serving and rebuilding
   FileWatch.hx           file watching, for the dev server
 docs/comparison.md       hotreload-nim and hotreload-hx side by side
-tests/parity/            the behavior test: a program edited as it runs, and its builds, checked
+tests/behavior/          the behavior test: a program edited as it runs, and its builds, checked
 tests/matrix/            the capability matrix behind docs/comparison.md
 tests/scale/             reload time by program size, for JS and Nim
 examples/hello/          a page with a reloaded class and an asset
 ```
 
-`python3 tests/parity/run.py` is the test to run after a change: it exits with 1 when
+`python3 tests/behavior/run.py` is the test to run after a change: it exits with 1 when
 something differs from what's expected.
 
 ## License

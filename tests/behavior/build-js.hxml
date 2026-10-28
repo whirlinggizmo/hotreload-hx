@@ -1,0 +1,5 @@
+# the behavior test's program, JS: run.py serves it with hotreload.DevServer and runs it in node
+-cp src
+-lib hotreload-hx
+--main Main
+--js out/js/main.js
