@@ -562,7 +562,7 @@ class Builder {
 	Represents a class's code as written, for a reload to compare (`JsSwap.compareCode`).
 
 	Holds hashes of the main function, the constructor, each instance field's initializer and
-	each method's closures. The hash of a closure, a main or a constructor leaves out the
+	each method's closures, and each instance field's declared type. The hash of a closure, a main or a constructor leaves out the
 	closures inside it. An edit is therefore reported once, at the closure where it was made.
 **/
 private class CodeInfo {
@@ -591,8 +591,9 @@ private class CodeInfo {
 				closuresIn(f.expr, found);
 				if (found.length > 0)
 					closures.push({field: field.name, expr: macro $a{found}});
-			case FVar(_, e) | FProp(_, _, _, e) if (!isStatic && Builder.hasStorage(field)):
-				fields.push({field: field.name, expr: macro $v{e == null ? "" : hash(e)}});
+			case FVar(t, e) | FProp(_, _, t, e) if (!isStatic && Builder.hasStorage(field)):
+				var info = macro {init: $v{e == null ? "" : hash(e)}, type: $v{t == null ? "" : t.toString()}};
+				fields.push({field: field.name, expr: info});
 			default:
 		}
 	}

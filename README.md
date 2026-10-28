@@ -329,6 +329,7 @@ A reload reports each saved edit that it cannot bring in:
 hotreload: main: Main.main changed (not run again); use an @:afterHotReload hook
 hotreload: constructor: game.Enemy changed (existing objects not constructed again)
 hotreload: field: game.Enemy.shield initializer changed (existing objects keep their values)
+hotreload: field: game.Enemy.hp type changed (Int to Float, existing objects keep their values)
 hotreload: field: game.Enemy.hp removed, game.Enemy.health added (values not moved)
 hotreload: closure: src/Game.hx:30 changed (in Game.makeCallback, ones made before the reload run the old body)
 hotreload: enum: game.Mood.Angry moved (index 2 to 3, unreached values match another case)

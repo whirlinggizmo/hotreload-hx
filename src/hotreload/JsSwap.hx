@@ -357,10 +357,10 @@ class JsSwap {
 		The build records each class's code as hashes (`__hot_code__`, Builder's `CodeInfo`).
 		A changed main is reported because it does not run again. A changed constructor is
 		reported because objects made before the reload are not constructed again. A changed
-		field initializer is reported because existing objects keep their values. A field
-		removed while another is added is reported as a possible rename, since values are
-		not moved. A changed closure is reported because instances made before the reload
-		keep the old body.
+		field initializer or declared field type is reported because existing objects keep
+		their values. A field removed while another is added is reported as a possible rename,
+		since values are not moved. A changed closure is reported because instances made before
+		the reload keep the old body.
 
 		Closures are compared per method, as sets of hashes. A closure counts as changed only
 		when as many hashes went as came, so an added closure is not taken for an edit.
@@ -379,9 +379,15 @@ class JsSwap {
 		var removed = [for (f in Reflect.fields(was.fields)) if (!Reflect.hasField(now.fields, f)) '$name.$f'];
 		var added = [];
 		for (f in Reflect.fields(now.fields)) {
-			if (!Reflect.hasField(was.fields, f))
+			var w:Dynamic = Reflect.field(was.fields, f);
+			var n:Dynamic = Reflect.field(now.fields, f);
+			if (w == null) {
 				added.push('$name.$f');
-			else if (Reflect.field(now.fields, f) != "" && Reflect.field(was.fields, f) != Reflect.field(now.fields, f))
+				continue;
+			}
+			if (w.type != "" && n.type != "" && w.type != n.type)
+				log('field: $name.$f type changed (${w.type} to ${n.type}, existing objects keep their values)');
+			if (n.init != "" && w.init != n.init)
 				log('field: $name.$f initializer changed (existing objects keep their values)');
 		}
 		if (removed.length > 0 && added.length > 0)

@@ -1,7 +1,7 @@
 /**
 	The code-change test: one edit to what a reload cannot bring in, each said. The main,
-	a closure main made, the constructor of an object made before, a field initializer, and
-	a field renamed
+	a closure main made, the constructor of an object made before, a field initializer, a
+	field's type, and a field renamed
 **/
 class Main {
 	static var enemy:Enemy;

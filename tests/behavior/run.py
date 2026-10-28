@@ -357,7 +357,8 @@ def dev_enums():
 
 def dev_code():
     """code/, edited once in what a reload cannot bring in: main, a closure main made, the
-    constructor of an object made before, a field initializer, and a field renamed. Its
+    constructor of an object made before, a field initializer, a field's type, and a field
+    renamed. Its
     lines: the reload's messages, sorted, and what the program says, or None"""
     print("\n== what a reload cannot bring in, said (JS)")
 
@@ -365,7 +366,7 @@ def dev_code():
         main = os.path.join(src, "Main.hx")
         text = open(main).read()
         for old, new in [("\t\tenemy = new Enemy();\n", "\t\tenemy = new Enemy();\n\t\tsay(\"main v2\");\n"),
-                         ('"tick v1"', '"tick v2"'), ("hp = 3;", "hp = 4;"), ("shield = 10;", "shield = 20;"),
+                         ('"tick v1"', '"tick v2"'), ("hp = 3;", "hp = 4;"), ("var hp:Int;", "var hp:Float;"), ("shield = 10;", "shield = 20;"),
                          ("var mana = 5;", "var energy = 5;")]:
             assert old in text, old
             text = text.replace(old, new)
@@ -430,6 +431,7 @@ DEV_ENUMS = ["enums held=sad captured=sad angry3 true edited=happy false",
 # after. The program's are the same: none of the edits reaches what was already made
 DEV_CODE = ["hotreload: closure: src/Main.hx:15 changed (in Main.main, ones made before the reload run the old body)",
             "hotreload: constructor: Enemy changed (existing objects not constructed again)",
+            "hotreload: field: Enemy.hp type changed (Int to Float, existing objects keep their values)",
             "hotreload: field: Enemy.mana removed, Enemy.energy added (values not moved)",
             "hotreload: field: Enemy.shield initializer changed (existing objects keep their values)",
             "hotreload: main: Main.main changed (not run again); use an @:afterHotReload hook",
