@@ -88,7 +88,7 @@ def program():
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     server_log = os.path.join(LOGS, "js-server.log")
-    server = Program(HERE, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build-js.hxml"], server_log)
+    server = Program(HERE, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"], server_log)
     p = None
     try:
         if not server.wait(r"hotreload: ready", timeout=120, show=False):
