@@ -133,6 +133,10 @@ A node program requests new builds from `HOTRELOAD_URL` (defaults to
 `http://localhost:8080/__hotreload`). A request to `/__hotreload_stop` from the same machine
 stops the dev server and its compilation server.
 
+A web worker started from the hot bundle (`new Worker("main.js")`) reloads with the page.
+Each of them asks the dev server for new builds and takes on the new code on its own. A
+worker built from another hxml is not rebuilt or reloaded.
+
 ### Trying it
 
 `examples/hello` is a small page:

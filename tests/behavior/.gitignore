@@ -3,3 +3,4 @@ src/game/
 out/
 logs/
 *.tmp
+worker/web/main.js*

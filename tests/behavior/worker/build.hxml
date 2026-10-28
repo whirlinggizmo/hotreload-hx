@@ -1,0 +1,5 @@
+# the worker test: run.py serves a copy of it with hotreload.DevServer and opens it in headless Chromium
+-cp src
+-lib hotreload-hx
+--main Main
+--js web/main.js

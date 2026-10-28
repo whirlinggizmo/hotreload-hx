@@ -36,6 +36,8 @@ it runs, and its builds. It checks the rules for statics:
   unchanged; reloads go on after each;
 - an enum-keyed map still finds its keys after its enum's constructors are reordered, and
   a native Map's keys and a native Set's items are walked;
+- a web worker started from the hot bundle takes on the new code with the page (in
+  headless Chromium, when there is one);
 - an edit a reload cannot bring in is said: main, a closure, a constructor, a field
   initializer and a renamed field;
 - built through a compilation server, from its cache, into an output directory that isn't
@@ -378,6 +380,70 @@ def dev_collections():
     return served_edit("collections", edit_to, r"^collections ", ("collections ",))
 
 
+def headless_chromium():
+    """a headless Chromium to open a page with: $CHROMIUM, or Playwright's, or None"""
+    import glob
+    if os.environ.get("CHROMIUM"):
+        return os.environ["CHROMIUM"]
+    found = sorted(glob.glob(os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-*/*/chrome-headless-shell")))
+    return found[-1] if found else None
+
+
+def dev_worker():
+    """worker/, served and opened in headless Chromium: a page that starts a web worker from
+    the hot bundle. Whether both report the new code after an edit. Their lines, "skipped"
+    when there is no headless Chromium, or None"""
+    print("\n== a web worker started from the hot bundle (JS, headless Chromium)")
+    chromium = headless_chromium()
+    if chromium is None:
+        print("    skipped: no headless Chromium (set CHROMIUM, or install Playwright's)")
+        return "skipped"
+    work = os.path.join(HERE, "out", "worker")
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(HERE, "worker"), work)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = Program(work, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
+                     os.path.join(LOGS, "dev-worker-server.log"))
+    browser = None
+    console = r'CONSOLE.*?\] "(worker-test [^"]*)"'
+    try:
+        if not server.wait(r"hotreload: ready", timeout=120, show=False):
+            return None
+        # (its console lines are in its log, with --enable-logging)
+        browser = Program(work, [chromium, "--no-sandbox", "--enable-logging=stderr", "--v=0",
+                                 "--user-data-dir=" + os.path.join(work, "profile"), f"http://127.0.0.1:{port}/index.html"],
+                          os.path.join(LOGS, "dev-worker-browser.log"))
+
+        def seen():
+            return re.findall(console, open(browser.log).read())
+
+        def wait_for(lines):
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                if all(l in seen() for l in lines):
+                    return True
+                time.sleep(0.1)
+            print(f"    !! timed out waiting for {lines}")
+            return False
+
+        if not wait_for(["worker-test page v1", "worker-test worker v1"]):
+            return None
+        main = os.path.join(work, "src", "Main.hx")
+        save(main, open(main).read().replace(" v1');", " v2');"))
+        if not wait_for(["worker-test page v2", "worker-test worker v2"]):
+            return None
+        lines = seen()
+        for l in lines:
+            print("    | " + l)
+        return sorted(lines)
+    finally:
+        if browser:
+            browser.stop()
+        server.stop()
+
+
 def dev_code():
     """code/, edited once in what a reload cannot bring in: main, a closure main made, the
     constructor of an object made before, a field initializer, a field's type, and a field
@@ -526,6 +592,9 @@ DEV_RECOVERY = ["recovery v1 count=2 edited=20",
 DEV_COLLECTIONS = ["collections moods=a,b,c,d key=k,null item=k,null",
                    "collections moods=a,b,c,d key=k,5 item=k,5"]
 
+# the worker test's lines, sorted: the page and the worker, each before and after the reload
+DEV_WORKER = ["worker-test page v1", "worker-test page v2", "worker-test worker v1", "worker-test worker v2"]
+
 
 def check(name, result):
     """what the test found, against what's expected"""
@@ -565,6 +634,9 @@ def check(name, result):
     if "dev_collections" in result and result["dev_collections"] != DEV_COLLECTIONS:
         print(f"  FAILED {name}, collections across a reload: {result['dev_collections']!r}, expected {DEV_COLLECTIONS!r}")
         failures += 1
+    if "dev_worker" in result and result["dev_worker"] not in ("skipped", DEV_WORKER):
+        print(f"  FAILED {name}, a web worker across a reload: {result['dev_worker']!r}, expected {DEV_WORKER!r}")
+        failures += 1
     if result.get("dev_watch") is False:
         print(f"  FAILED {name}: the DevServer didn't watch and build a directory it was told to watch")
         failures += 1
@@ -593,6 +665,7 @@ if __name__ == "__main__":
     result["dev_enums"] = dev_enums()
     result["dev_collections"] = dev_collections()
     result["dev_code"] = dev_code()
+    result["dev_worker"] = dev_worker()
     result["dev_recovery"] = dev_recovery()
     result["server"] = server()
     print("\n== results")

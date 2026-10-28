@@ -122,13 +122,14 @@ class JsSwap {
 	}
 
 	/**
-		Returns whether the code runs in a page.
+		Returns whether the code runs in a page or in a web worker.
 
-		The answer decides where to ask for a newer bundle and how to load one. A page asks the
-		server it came from.
+		The answer decides where to ask for a newer bundle and how to load one. A page or a
+		worker asks the server it came from, and imports the bundle. A worker started from the
+		hot bundle (`new Worker("main.js")`) reloads with the page, each on its own.
 	**/
 	static function inBrowser():Bool
-		return Syntax.code("typeof document != 'undefined'");
+		return Syntax.code("typeof document != 'undefined' || (typeof WorkerGlobalScope != 'undefined' && self instanceof WorkerGlobalScope)");
 
 	static function statusUrl():String {
 		#if hotreload_url
