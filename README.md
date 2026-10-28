@@ -369,10 +369,9 @@ src/hotreload/
   Hooks.hx               reload hooks
   DevServer.hx           building, serving and rebuilding
   FileWatch.hx           file watching, for the dev server
-docs/comparison.md       hotreload-nim and hotreload-hx side by side
 tests/behavior/          the behavior test: a program edited as it runs, and its builds, checked
-tests/matrix/            the capability matrix behind docs/comparison.md
-tests/scale/             reload time by program size, for JS and Nim
+tests/matrix/            the capability matrix: one program, many kinds of edit, read by hand
+tests/scale/             reload time by program size
 examples/hello/          a page with a reloaded class and an asset
 ```
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The capability matrix behind docs/comparison.md: a hot program, served with
-hotreload.DevServer and run in node, edited while it runs, showing what each reload did.
-The output is read by hand; nothing here passes or fails on its own.
+"""The capability matrix: a hot program, served with hotreload.DevServer and run in node,
+edited while it runs, showing what each reload did. The output is read by hand. Nothing
+here passes or fails on its own.
 
     python3 tests/matrix/run.py
 """

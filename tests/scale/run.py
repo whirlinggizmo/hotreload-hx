@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""How reload time grows with the size of the application: generates a program of N
-classes (or Nim modules), builds it hot, runs it, and times a one-line edit to the hot
-code and one to the deepest class, which everything depends on. The output is read by
-hand; nothing here passes or fails on its own.
+"""Measures how reload time grows with the size of the application.
 
-    python3 tests/scale/run.py                       both kinds, at 100, 1000 and 3000
-    python3 tests/scale/run.py js --sizes 100,1000
-    python3 tests/scale/run.py nim --nim ../hotreload-nim
-    python3 tests/scale/run.py js --sizes 100 --keep    keeps gen/ to look into
+Generates a program of N classes, builds it hot, runs it in node through hotreload.DevServer,
+and times one-line edits to the hot code and to the deepest class, which everything depends
+on. The whole bundle is rebuilt on each edit. The output is read by hand. Nothing here passes
+or fails on its own.
 
-Each program is generated in gen/ and deleted once it's measured (they and their builds
-run to gigabytes), and gen/ goes at the end of a run, but with --keep.
+    python3 tests/scale/run.py                       at 100, 1000 and 3000 classes
+    python3 tests/scale/run.py --sizes 100,1000
+    python3 tests/scale/run.py --sizes 100 --keep    keeps gen/ to look into
 
-The kinds:
-    js        JS in node, through hotreload.DevServer (the whole bundle is rebuilt)
-    nim       hotreload-nim, the modules imported by game.nim, which are all reloaded
+Each program is generated in gen/ and deleted once it is measured, since the programs and
+their builds run to gigabytes. gen/ itself is deleted at the end of a run, unless --keep is
+provided.
 """
 import argparse, os, re, shutil, socket, subprocess, sys, time
 
@@ -28,7 +26,7 @@ EDITS = 3
 
 
 def deps(i, n):
-    """the classes C<i> refers to: always later ones, so Nim's imports have no cycle"""
+    """the classes C<i> refers to: always later ones, so the imports have no cycle"""
     return sorted({j for j in (i + 1, i + 2 + (i * 7) % 11) if j < n})
 
 
@@ -159,110 +157,6 @@ def gen_hx(kind, n):
     return root, os.path.join(root, "src", "game", "Game.hx"), os.path.join(root, "src", pkg, f"C{n - 1}.hx")
 
 
-# --- Nim -----------------------------------------------------------------------------
-
-def nim_module(i, n):
-    d = deps(i, n)
-    imports = "import std/[tables, algorithm, strutils, math]\n" + "".join(f"import ./c{j}\n" for j in d)
-    fields = "".join(f"    link{j}*: C{j}\n" for j in d)
-    links = "".join(f"  c.link{j} = newC{j}()\n" for j in d) or "  discard\n"
-    return f"""{imports}
-type
-  C{i}Point* = object
-    x*, y*: float
-  C{i}KindTag* = enum c{i}Small, c{i}Big, c{i}Named
-  C{i}Kind* = object
-    case tag*: C{i}KindTag
-    of c{i}Small: discard
-    of c{i}Big: size*: int
-    of c{i}Named:
-      name*: string
-      weight*: float
-  C{i}* = ref object
-    x*: float
-    items*: seq[int]
-    name*: string
-    kind*: C{i}Kind
-    points: seq[C{i}Point]
-    lookup: Table[string, int]
-{fields}
-proc newC{i}*(): C{i} =
-  result = C{i}(x: {i}.0, name: "c{i}", points: @[C{i}Point(x: 1, y: 2), C{i}Point(x: 3, y: 4)],
-              lookup: {{"a": 1, "b": 2}}.toTable)
-  for k in 0 ..< 4: result.items.add k * {i % 13 + 1}
-  result.kind = if {i} mod 2 == 0: C{i}Kind(tag: c{i}Big, size: {i}) else: C{i}Kind(tag: c{i}Named, name: result.name, weight: 0.5)
-
-proc link*(c: C{i}) =
-{links}
-proc step*(c: C{i}, dt: float): float =
-  var s = c.x
-  for v in c.items: s += v.float * dt
-  for p in c.points: s += p.x * p.y
-  s += (case c.kind.tag
-        of c{i}Small: 1.0
-        of c{i}Big: c.kind.size.float * 0.5
-        of c{i}Named: c.kind.weight)
-  c.x = s mod 1000
-  c.x
-
-proc describe*(c: C{i}): string =
-  var parts: seq[string]
-  for k, v in c.lookup: parts.add k & "=" & $v
-  parts.sort()
-  c.name & "(" & parts.join(",") & ")"
-
-proc mixC{i}*(a, b: int): int =
-  var h = a * 31 + b
-  for k in 0 ..< 3: h = (h xor (h shr 3)) + k
-  let f = proc (v: int): int = v and 0xffff
-  f(h)
-
-proc tagC{i}*(): string = "d0"
-"""
-
-
-def nim_game(n):
-    return f"""import hotreload
-import ./c0, ./c{n - 1}
-
-var seen {{.hot.}} = ""
-var total {{.hot.}} = 0
-
-proc tick*() {{.hot.}} =
-  let v = "version v0 " & tagC{n - 1}()
-  if v != seen:
-    seen = v
-    echo v
-  total += mixC0(3, 4)
-"""
-
-
-NIM_MAIN = """import std/os
-import hotreload
-import ./game
-
-let reloader = newReloader()
-while true:
-  reloader.update()
-  tick()
-  sleep(20)
-"""
-
-
-def gen_nim(n, hotreload_nim):
-    root = os.path.join(GEN, f"nim-{n}")
-    if os.path.isdir(root):
-        shutil.rmtree(root)
-    src = os.path.join(root, "src")
-    os.makedirs(src)
-    for i in range(n):
-        save(os.path.join(src, f"c{i}.nim"), nim_module(i, n))
-    save(os.path.join(src, "game.nim"), nim_game(n))
-    save(os.path.join(src, "main.nim"), NIM_MAIN)
-    save(os.path.join(root, "config.nims"), f'switch("path", "{os.path.join(hotreload_nim, 'src')}")\n')
-    return root, os.path.join(src, "game.nim"), os.path.join(src, f"c{n - 1}.nim")
-
-
 # --- running -------------------------------------------------------------------------
 
 class Log:
@@ -337,10 +231,7 @@ def edit_and_wait(prog, builder, path, old, new, expect, timeout):
 def measure(kind, n, args):
     tag = f"{kind}-{n}"
     print(f"\n== {tag}: generating")
-    if kind == "nim":
-        root, game, deep = gen_nim(n, args.nim)
-    else:
-        root, game, deep = gen_hx(kind, n)
+    root, game, deep = gen_hx(kind, n)
     try:
         return run(kind, n, args, tag, root, game, deep)
     finally:
@@ -353,26 +244,17 @@ def run(kind, n, args, tag, root, game, deep):
     print(f"   building")
     blog = os.path.join(LOGS, f"{tag}-build.log")
     server = None
-    if kind == "nim":
-        exe = os.path.join(root, "out", "main")
-        full = timed(["nim", "c", "-d:hotReload", "-d:useMalloc", "--debugger:native", "--hints:off",
-                      f"--out:{exe}", os.path.join(root, "src", "main.nim")], root, blog)
-    else:
-        full = timed(["haxe", "build.hxml"], root, blog)  # the dev server builds it again; this times one build
+    full = timed(["haxe", "build.hxml"], root, blog)  # the dev server builds it again; this times one build
     print(f"   full build {full:.1f} s; running")
 
-    if kind == "js":
-        port = free_port()
-        server = Log(root, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
-                     os.path.join(LOGS, f"{tag}-server.log"))
-        if server.wait(r"hotreload: ready", args.timeout)[0] is None:
-            sys.exit("the DevServer didn't start")
-        env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
-        prog = Log(root, ["node", "out/js/main.js"], os.path.join(LOGS, f"{tag}.log"), env=env)
-        builder = server
-    else:
-        prog = Log(root, [os.path.join(root, "out", "main")], os.path.join(LOGS, f"{tag}.log"))
-        builder = prog
+    port = free_port()
+    server = Log(root, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
+                 os.path.join(LOGS, f"{tag}-server.log"))
+    if server.wait(r"hotreload: ready", args.timeout)[0] is None:
+        sys.exit("the DevServer didn't start")
+    env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
+    prog = Log(root, ["node", "out/js/main.js"], os.path.join(LOGS, f"{tag}.log"), env=env)
+    builder = server
 
     result = {"kind": kind, "n": n, "full": full, "first": None, "game": [], "deep": []}
     try:
@@ -425,21 +307,16 @@ def table(results):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("kinds", nargs="*", default=["js", "nim"])
     ap.add_argument("--sizes", default="100,1000,3000")
-    ap.add_argument("--nim", default=os.path.join(HERE, "..", "..", "..", "hotreload-nim"),
-                    help="a checkout of hotreload-nim")
     ap.add_argument("--timeout", type=float, default=900)
     ap.add_argument("--keep", action="store_true",
                     help="keep the generated programs and their builds in gen/, to look into one")
     args = ap.parse_args()
-    args.nim = os.path.abspath(args.nim)
     os.makedirs(LOGS, exist_ok=True)
     results = []
     try:
         for n in [int(s) for s in args.sizes.split(",")]:
-            for kind in args.kinds:
-                results.append(measure(kind, n, args))
+            results.append(measure("js", n, args))
     finally:
         # what's left in gen/, a stopped run's or a --keep run's, goes too
         if not args.keep:

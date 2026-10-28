@@ -1,8 +1,6 @@
 # The capability matrix
 
-The programs behind [docs/comparison.md](../../docs/comparison.md): a hot program edited
-while it runs, showing what each reload did. hotreload-nim has the same scenarios in its
-`tests/matrix/`.
+A hot program edited while it runs, showing what each reload did.
 
 ```bash
 python3 tests/matrix/run.py           # from the repo's directory
