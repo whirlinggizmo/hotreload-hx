@@ -31,6 +31,9 @@ it runs, and its builds. It checks the rules for statics:
 - an enum constant with no arguments is the same object across a reload, its index the new
   code's: one a closure holds still matches its case and equals the new code's constant,
   with constructors put before it; a moved constructor with arguments is said;
+- an abstract's statics are kept like a class's; a reload hook that throws is reported
+  and the reload completes; a bundle that fails to load is dropped, the running code
+  unchanged; reloads go on after each;
 - an edit a reload cannot bring in is said: main, a closure, a constructor, a field
   initializer and a renamed field;
 - built through a compilation server, from its cache, into an output directory that isn't
@@ -40,7 +43,7 @@ it runs, and its builds. It checks the rules for statics:
 
 It exits with 1 when something differs from what's expected.
 """
-import json, os, shutil, socket, subprocess, sys
+import json, os, re, shutil, socket, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "matrix"))
@@ -378,6 +381,58 @@ def dev_code():
     return sorted(l for l in lines if l.startswith("hotreload:")) + [l for l in lines if not l.startswith("hotreload:")]
 
 
+def dev_recovery():
+    """recovery/, edited five times. An abstract's statics are kept, and an edited first value
+    resets one. A hook that throws is reported and the reload completes. Reloads go on after
+    it. A bundle whose static initializer throws fails to load, and the running code's enum
+    constants keep their indices (a check every 100 ms reports a wrong one). The fix loads.
+    Its lines, or None"""
+    print("\n== reloads after a failure, and an abstract's statics (JS)")
+    work = os.path.join(HERE, "out", "recovery")
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(HERE, "recovery"), work)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = Program(work, ["haxe", "-lib", "hotreload-hx", "--run", "hotreload.DevServer", "--port", str(port), "build.hxml"],
+                     os.path.join(LOGS, "dev-recovery-server.log"))
+    p = None
+    main = os.path.join(work, "src", "Main.hx")
+
+    def change(*pairs):
+        text = open(main).read()
+        for old, new in pairs:
+            assert old in text, old
+            text = text.replace(old, new)
+        save(main, text)
+
+    try:
+        if not server.wait(r"hotreload: ready", timeout=120, show=False):
+            return None
+        env = dict(os.environ, HOTRELOAD_URL=f"http://127.0.0.1:{port}/__hotreload")
+        p = Program(work, ["node", "out/main.js"], os.path.join(LOGS, "dev-recovery.log"), env=env)
+        if not p.wait(r"^recovery v1", timeout=30):
+            return None
+        steps = [
+            [("recovery v1", "recovery v2"), ("edited = 10;", "edited = 11;")],
+            [("recovery v2", "recovery v3"), ("class Game {\n", "class Game {\n\t@:afterHotReload static function boom()\n\t\tthrow \"boom\";\n\n")],
+            [("recovery v3", "recovery v4")],
+            [("recovery v4", "recovery v5"), ("enum Mood {\n", "enum Mood {\n\tCalm;\n"), ("public static var held:Mood;", "public static var held:Mood;\n\tstatic var bad = Main.fail();")],
+            [("\n\tstatic var bad = Main.fail();", "")],
+        ]
+        for step in steps:
+            change(*step)
+            if not p.wait(r"^hotreload: reload: (done|cannot load)", timeout=60):
+                return None
+            time.sleep(0.5)
+        return [re.sub(r"cannot load .*", "cannot load", l) for l in open(p.log).read().splitlines()
+                if l.startswith(("recovery ", "hotreload: hook:", "hotreload: static:", "hotreload: reload: failed", "hotreload: reload: cannot"))]
+    finally:
+        if p:
+            p.stop()
+        server.stop()
+
+
 def server():
     """the program built through a compilation server, as the DevServer and an editor do:
     four builds, the later ones from the server's cache, into an output directory that
@@ -437,6 +492,16 @@ DEV_CODE = ["hotreload: closure: src/Main.hx:15 changed (in Main.main, ones made
             "hotreload: main: Main.main changed (not run again); use an @:afterHotReload hook",
             "code tick v1 hp=3 shield=10", "code tick v1 hp=3 shield=10"]
 
+# the recovery test's lines: no "recovery wrong" among them (the running code's enum
+# constants keep their indices after a failed load)
+DEV_RECOVERY = ["recovery v1 count=2 edited=20",
+                "hotreload: static: Counter.edited reset (initial value changed: 10 to 11)",
+                "recovery v2 count=2 edited=11",
+                "hotreload: hook: Game.boom failed (boom)", "recovery v3 count=2 edited=11",
+                "hotreload: hook: Game.boom failed (boom)", "recovery v4 count=2 edited=11",
+                "hotreload: reload: cannot load",
+                "hotreload: hook: Game.boom failed (boom)", "recovery v5 count=2 edited=11"]
+
 
 def check(name, result):
     """what the test found, against what's expected"""
@@ -470,6 +535,9 @@ def check(name, result):
     if "dev_code" in result and result["dev_code"] != DEV_CODE:
         print(f"  FAILED {name}, what a reload cannot bring in: {result['dev_code']!r}, expected {DEV_CODE!r}")
         failures += 1
+    if "dev_recovery" in result and result["dev_recovery"] != DEV_RECOVERY:
+        print(f"  FAILED {name}, reloads after a failure: {result['dev_recovery']!r}, expected {DEV_RECOVERY!r}")
+        failures += 1
     if result.get("dev_watch") is False:
         print(f"  FAILED {name}: the DevServer didn't watch and build a directory it was told to watch")
         failures += 1
@@ -497,6 +565,7 @@ if __name__ == "__main__":
     result["dev_bind"] = dev_bind()
     result["dev_enums"] = dev_enums()
     result["dev_code"] = dev_code()
+    result["dev_recovery"] = dev_recovery()
     result["server"] = server()
     print("\n== results")
     failures = check("js", result)

@@ -411,7 +411,7 @@ class Builder {
 			if (hook != null) {
 				var after = hook.name == ":afterHotReload";
 				var name = field.name;
-				extra.push(staticVar('__hot_hook_$name', macro:Bool, macro hotreload.Hooks.add($v{after}, $i{name}), field.pos));
+				extra.push(staticVar('__hot_hook_$name', macro:Bool, macro hotreload.Hooks.add($v{after}, $v{className + "." + name}, $i{name}), field.pos));
 				changed = true;
 			} else if (field.name == "main" && field.access.contains(AStatic) && isMain(cls)) {
 				switch (field.kind) {
@@ -431,11 +431,23 @@ class Builder {
 		}
 		var file = fileOf(cls.pos);
 		var abstractImpl = cls.kind.match(KAbstractImpl(_)) || Context.getLocalType().match(TAbstract(_, _));
-		if (statics.length > 0 && !cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
+		var ours = !cls.isInterface && !cls.isExtern && file != null && !file.startsWith(stdDir());
+		if (statics.length > 0 && ours) {
 			extra.push(staticVar("__hot_statics__", macro:Dynamic, {expr: EObjectDecl(statics), pos: cls.pos}, cls.pos));
 			changed = true;
 		}
-		if (!cls.isInterface && !cls.isExtern && !abstractImpl && file != null && !file.startsWith(stdDir())) {
+		// Haxe leaves an abstract's implementation out of $hxClasses, where a swap finds a
+		// bundle's classes. It is added under the abstract's name, so its statics are kept.
+		if (abstractImpl && ours && cls.kind.match(KAbstractImpl(_)) && !file.startsWith(ownDir())) {
+			var a = switch (cls.kind) {
+				case KAbstractImpl(a): a.get();
+				default: null;
+			}
+			var register = "$hxClasses[" + haxe.Json.stringify(fullName(a.pack, a.name)) + "] = " + jsName(cls);
+			extra.push(staticVar("__hot_class__", macro:Dynamic, macro js.Syntax.code($v{register}), cls.pos));
+			changed = true;
+		}
+		if (ours && !abstractImpl) {
 			var info = code.expr(cls.pos);
 			if (info != null && !file.startsWith(ownDir())) {
 				extra.push(staticVar("__hot_code__", macro:Dynamic, info, cls.pos));

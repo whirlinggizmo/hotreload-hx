@@ -57,11 +57,12 @@ class JsSwap {
 			classes: Syntax.code("$hxClasses"),
 			enums: Syntax.code("(typeof $hxEnums != 'undefined' ? $hxEnums : {})"),
 			self: self,
+			adopted: new Array<{value:Dynamic, index:Int}>(),
 		};
 		var bundles:Array<Dynamic> = state.bundles;
 		bundles.push(bundle);
 		if (bundles.length > 1) {
-			adoptEnums(bundles[bundles.length - 2].enums, bundle.enums);
+			adoptEnums(bundles[bundles.length - 2].enums, bundle.enums, bundle.adopted);
 			return true;
 		}
 		Syntax.code("setTimeout({0}, 0)", poll);
@@ -80,8 +81,9 @@ class JsSwap {
 
 		@param old  The running bundle's enums, by name.
 		@param neu  The new bundle's enums, by name.
+		@param adopted  Receives each constant taken, with its index before, for a failed load to restore.
 	**/
-	static function adoptEnums(old:Dynamic, neu:Dynamic) {
+	static function adoptEnums(old:Dynamic, neu:Dynamic, adopted:Array<{value:Dynamic, index:Int}>) {
 		for (name in Reflect.fields(neu)) {
 			var o:Dynamic = Reflect.field(old, name);
 			var n:Dynamic = Reflect.field(neu, name);
@@ -98,6 +100,7 @@ class JsSwap {
 				if (made != Syntax.code("typeof {0} == 'function'", value))
 					continue;
 				if (!made) {
+					adopted.push({value: value, index: value._hx_index});
 					value._hx_index = i;
 					Reflect.setField(n, ctor, value);
 					now[i] = value;
@@ -162,11 +165,24 @@ class JsSwap {
 				var bundles:Array<Dynamic> = state.bundles;
 				var before = bundles.length;
 				load(info).then(_ -> {
+					// A swap that throws partway leaves some classes swapped. Polling goes on,
+					// so the next build swaps in from where this one stopped.
 					if (bundles.length > before)
-						swap(bundles[bundles.length - 2], bundles[bundles.length - 1]);
+						try {
+							swap(bundles[bundles.length - 2], bundles[bundles.length - 1]);
+						} catch (e:Dynamic) {
+							log('reload: failed (${Std.string(e)}); save again to retry');
+						}
 					busy = false;
 					Syntax.code("setTimeout({0}, 0)", ask);
 				}, (e:Dynamic) -> {
+					// A bundle that registered and then failed (a static initializer threw) is
+					// dropped, and the enum constants it took get their indices back.
+					if (bundles.length > before) {
+						var failed:Dynamic = bundles.pop();
+						for (a in (failed.adopted:Array<{value:Dynamic, index:Int}>))
+							a.value._hx_index = a.index;
+					}
 					log('reload: cannot load ${info.url} ($e)');
 					busy = false;
 					Syntax.code("setTimeout({0}, 0)", ask);
@@ -221,15 +237,23 @@ class JsSwap {
 	static function log(message:String)
 		Syntax.code("console.log({0})", "hotreload: " + message);
 
+	/** Reports a reload hook, or a main class's callback, that threw. **/
+	static function hookFailed(name:String, e:Dynamic)
+		log('hook: $name failed (${Std.string(e)})');
+
 	/** Makes the bundle `neu`'s classes the current ones, in place of `old`'s (see the class doc). **/
 	static function swap(old:Dynamic, neu:Dynamic) {
 		var start = haxe.Timer.stamp();
 		var oldHooks:Dynamic = Reflect.field(old.classes, "hotreload.Hooks");
 		if (oldHooks != null)
-			oldHooks.runBefore();
+			oldHooks.runBefore(hookFailed);
 		for (r in reloaders)
 			if (r.beforeReload != null)
-				r.beforeReload();
+				try {
+					r.beforeReload();
+				} catch (e:Dynamic) {
+					hookFailed("beforeReload", e);
+				}
 
 		// The classes both bundles have, and their methods, mapped old to new. The first
 		// bundle's classes are included when it is not the old one. The main class, and
@@ -343,10 +367,14 @@ class JsSwap {
 
 		var newHooks:Dynamic = Reflect.field(neu.classes, "hotreload.Hooks");
 		if (newHooks != null)
-			newHooks.runAfter();
+			newHooks.runAfter(hookFailed);
 		for (r in reloaders)
 			if (r.afterReload != null)
-				r.afterReload();
+				try {
+					r.afterReload();
+				} catch (e:Dynamic) {
+					hookFailed("afterReload", e);
+				}
 		log('reload: done (${[for (p in pairs) if (p.carry) p].length} classes, $kept statics kept, $reset reset, ${walker.objects} objects, '
 			+ '${Math.round((haxe.Timer.stamp() - start) * 1000)} ms)');
 	}

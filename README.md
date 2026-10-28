@@ -314,6 +314,24 @@ connections.
 The bundle asks the dev server for a newer one with a long poll, so a reload starts as soon
 as the build is done.
 
+## When something fails
+
+A reload hook (or `beforeReload`, `afterReload`) that throws does not stop the reload or the
+other hooks. It is reported:
+
+```
+hotreload: hook: game.Level.rebuild failed (TypeError: cannot read properties of null)
+```
+
+A new bundle that fails as it loads, such as one whose static initializer throws, is
+dropped, and the running code continues unchanged. A swap that throws partway leaves some
+classes swapped, and is reported. In each case the next saved edit reloads again:
+
+```
+hotreload: reload: cannot load /main.js (Error: bad init)
+hotreload: reload: failed (TypeError: ...); save again to retry
+```
+
 ## Debugging
 
 Reloaded code runs at full speed. The browser's DevTools and VS Code's JavaScript debugger
