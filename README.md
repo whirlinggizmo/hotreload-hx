@@ -230,8 +230,10 @@ class Enemy {
 }
 ```
 
-hotreload walks arrays, maps, anonymous structures, class instances and enum values. Enum
-values are made again by constructor name. Shared objects stay shared, and cycles stay cycles.
+hotreload walks arrays, maps (keys and values), sets, anonymous structures, class instances
+and enum values. Enum values are made again by constructor name. An enum-keyed map is sorted
+again, so it still finds its keys after constructors are reordered. Shared objects stay
+shared, and cycles stay cycles.
 
 An enum constant with no arguments (`Sad`) is the same object across reloads, even where the
 walk does not reach, such as inside a closure. It still matches its `case` and equals the new

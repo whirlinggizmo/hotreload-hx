@@ -300,7 +300,7 @@ class JsSwap {
 		Syntax.code("for (const [o, n] of {0}) { o.__hot_next__ = n; if (o.__id__ != null && n.__id__ == null) n.__id__ = o.__id__; }", functions);
 
 		// The statics' values, and what they hold.
-		var walker = new Walker(protos, classes, functions, old.enums, neu.enums);
+		var walker = new Walker(protos, classes, functions, old.enums, neu.enums, Reflect.field(neu.classes, "haxe.ds.EnumValueMap"));
 		var kept = 0;
 		var reset = 0;
 		for (p in pairs) {
@@ -340,6 +340,7 @@ class JsSwap {
 				}
 		}
 		walker.finish();
+		walker.sortEnumMaps();
 
 		for (p in pairs)
 			if (p.carry)
@@ -483,13 +484,16 @@ private class Walker {
 	var functions:Dynamic;
 	var oldEnums:Dynamic;
 	var newEnums:Dynamic;
+	var enumMapClass:Dynamic;
+	var enumMaps:Array<Dynamic> = [];
 	var seen:Dynamic = Syntax.code("new Map()");
 	var pending:Array<Dynamic> = [];
 	var knownProtos:Dynamic = Syntax.code("new Set()");
 
 	public var objects = 0;
 
-	public function new(protos, classes, functions, oldEnums, newEnums) {
+	public function new(protos, classes, functions, oldEnums, newEnums, enumMapClass) {
+		this.enumMapClass = enumMapClass;
 		this.protos = protos;
 		this.classes = classes;
 		this.functions = functions;
@@ -539,8 +543,13 @@ private class Walker {
 				for (i in 0...a.length)
 					a[i] = visit(a[i]);
 			} else if (Syntax.code("{0} instanceof Map", v)) {
-				Syntax.code("for (const [k, x] of Array.from({0})) {0}.set(k, {1}(x))", v, visit);
+				// The keys too: an object's new fields, an enum value made again
+				Syntax.code("{ const entries = Array.from({0}); {0}.clear(); for (const [k, x] of entries) {0}.set({1}(k), {1}(x)); }", v, visit);
+			} else if (Syntax.code("{0} instanceof Set", v)) {
+				Syntax.code("{ const items = Array.from({0}); {0}.clear(); for (const x of items) {0}.add({1}(x)); }", v, visit);
 			} else {
+				if (enumMapClass != null && Syntax.code("{0} instanceof {1}", v, enumMapClass))
+					enumMaps.push(v);
 				var keys:Array<String> = Syntax.code("Object.keys({0})", v);
 				for (k in keys) {
 					if (k == "hx__closures__")
@@ -553,6 +562,17 @@ private class Walker {
 			}
 		}
 	}
+	/**
+		Sorts again each enum-keyed map the walk reached (`Map<Mood, T>`, an EnumValueMap).
+
+		Such a map is a tree ordered by constructor index. Its keys now have the new code's
+		indices, so its entries are inserted again in a cleared tree.
+	**/
+	public function sortEnumMaps() {
+		for (m in enumMaps)
+			Syntax.code("{ const entries = []; const walk = n => { if (n == null) return; walk(n.left); entries.push([n.key, n.value]); walk(n.right); }; walk({0}.root); {0}.root = null; for (const [k, x] of entries) {0}.set(k, x); }", m);
+	}
+
 
 	/**
 		Returns whether a value is worth walking into.
@@ -561,7 +581,7 @@ private class Walker {
 		engine's buffers are not.
 	**/
 	function walkable(v:Dynamic):Bool {
-		if (Syntax.code("Array.isArray({0}) || {0} instanceof Map", v))
+		if (Syntax.code("Array.isArray({0}) || {0} instanceof Map || {0} instanceof Set", v))
 			return true;
 		if (Syntax.code("ArrayBuffer.isView({0}) || {0} instanceof ArrayBuffer || {0} === globalThis", v))
 			return false;

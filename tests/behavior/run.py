@@ -34,6 +34,8 @@ it runs, and its builds. It checks the rules for statics:
 - an abstract's statics are kept like a class's; a reload hook that throws is reported
   and the reload completes; a bundle that fails to load is dropped, the running code
   unchanged; reloads go on after each;
+- an enum-keyed map still finds its keys after its enum's constructors are reordered, and
+  a native Map's keys and a native Set's items are walked;
 - an edit a reload cannot bring in is said: main, a closure, a constructor, a field
   initializer and a renamed field;
 - built through a compilation server, from its cache, into an output directory that isn't
@@ -358,6 +360,24 @@ def dev_enums():
     return served_edit("enums", edit_to, r"^enums ", ("enums ", "hotreload: enum:"))
 
 
+def dev_collections():
+    """collections/, edited once: an enum's constructors reordered (D first), and a class
+    that gains a field with an initializer. Whether an enum-keyed map still finds every key,
+    and a native Map's key and a native Set's item get the new field. Its lines, or None"""
+    print("\n== collections across a reload (JS)")
+
+    def edit_to(src):
+        main = os.path.join(src, "Main.hx")
+        text = open(main).read()
+        for old, new in [("\tA;\n\tB;\n\tC;\n\tD;", "\tD;\n\tA;\n\tB;\n\tC;"),
+                         ('public var name = "k";', 'public var name = "k";\n\tpublic var extra = 5;')]:
+            assert old in text, old
+            text = text.replace(old, new)
+        save(main, text)
+
+    return served_edit("collections", edit_to, r"^collections ", ("collections ",))
+
+
 def dev_code():
     """code/, edited once in what a reload cannot bring in: main, a closure main made, the
     constructor of an object made before, a field initializer, a field's type, and a field
@@ -502,6 +522,10 @@ DEV_RECOVERY = ["recovery v1 count=2 edited=20",
                 "hotreload: reload: cannot load",
                 "hotreload: hook: Game.boom failed (boom)", "recovery v5 count=2 edited=11"]
 
+# the collections test's lines, before and after: every key found, the new field on both
+DEV_COLLECTIONS = ["collections moods=a,b,c,d key=k,null item=k,null",
+                   "collections moods=a,b,c,d key=k,5 item=k,5"]
+
 
 def check(name, result):
     """what the test found, against what's expected"""
@@ -538,6 +562,9 @@ def check(name, result):
     if "dev_recovery" in result and result["dev_recovery"] != DEV_RECOVERY:
         print(f"  FAILED {name}, reloads after a failure: {result['dev_recovery']!r}, expected {DEV_RECOVERY!r}")
         failures += 1
+    if "dev_collections" in result and result["dev_collections"] != DEV_COLLECTIONS:
+        print(f"  FAILED {name}, collections across a reload: {result['dev_collections']!r}, expected {DEV_COLLECTIONS!r}")
+        failures += 1
     if result.get("dev_watch") is False:
         print(f"  FAILED {name}: the DevServer didn't watch and build a directory it was told to watch")
         failures += 1
@@ -564,6 +591,7 @@ if __name__ == "__main__":
     result["dev_watch"] = dev_watch()
     result["dev_bind"] = dev_bind()
     result["dev_enums"] = dev_enums()
+    result["dev_collections"] = dev_collections()
     result["dev_code"] = dev_code()
     result["dev_recovery"] = dev_recovery()
     result["server"] = server()
