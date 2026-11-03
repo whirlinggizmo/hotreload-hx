@@ -228,7 +228,7 @@ These come from a few limits:
   The lambda is the one to use when the callback needs local variables, since it can pass them
   along (`file -> loaded(file, ship)`).
 - **Renamed fields aren't moved.** On existing objects, a renamed or removed field is
-  `undefined`. So is a new field that has no initializer.
+  `undefined`. A field you add without an initializer is `undefined` on them as well.
 - **Only reachable objects are updated.** An object that no static leads to keeps its old
   class, although its methods still forward to the new code. The same applies to an enum value
   with arguments. If you insert constructors before it, it can match the wrong `case`, and that
