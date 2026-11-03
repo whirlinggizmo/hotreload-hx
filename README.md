@@ -56,7 +56,12 @@ Add `-lib hotreload-hx` to your JS build and create a `hotreload.Reloader` in `m
 -lib hotreload-hx
 --main Main
 --js web/main.js
+
+# as usual, -debug is needed for source maps
 -debug
+
+# hot reload needs ES6 or later, so -lib hotreload-hx sets this directly
+#-D js-es=6
 ```
 
 ```haxe
@@ -89,7 +94,7 @@ terminal and the page keeps running the last good build.
 To make a release build, run `haxe build.hxml` as usual. Without the dev server, hot reload is
 compiled out and `Reloader` does nothing.
 
-The build must output ES6 or later (`-D js-es=6`). The library sets that for you.
+To target a later ES version, put `-D js-es=<n>` after `-lib hotreload-hx`.
 
 The library's defines and metadata are listed in [Defines and metadata](#defines-and-metadata).
 
