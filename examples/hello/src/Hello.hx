@@ -2,18 +2,19 @@ using Lambda;
 using StringTools;
 
 /**
-	hotreload's hello: the reloaded class. Edit it while it runs (the name, how often it
-	speaks) and save; or edit assets/greeting.txt, an asset, which is read again as it's
-	saved.
+	The class to edit while hello runs.
+
+	Try changing the name, or how often it speaks, and save. You can also edit
+	assets/greeting.txt, which is read again whenever it is saved.
 **/
 class Hello {
-	// kept across reloads, until its first value is edited: then it's the new one
+	// Kept across reloads. If you edit this initial value, the reload uses the new one.
 	static var name = "world";
 
-	static var ticks = 0; // kept: it counts on through each reload
-	@:resetOnHotReload static var sinceReload = 0; // starts over with each reload
+	static var ticks = 0; // Kept across reloads, so it keeps counting.
+	@:resetOnHotReload static var sinceReload = 0; // Starts over on every reload.
 
-	static var greeting = "Hello"; // read from assets/greeting.txt
+	static var greeting = "Hello"; // Read from assets/greeting.txt.
 
 	public static function onStart() {
 		readGreeting();
@@ -39,13 +40,13 @@ class Hello {
 			say('$greeting, $name! (ticks: $ticks, since the last reload: $sinceReload)');
 	}
 
-	/** saved assets, from the reloader (hot builds only), by URL **/
+	/** Called by the reloader with the URLs of saved assets. Hot builds only. **/
 	public static function onAssetsChanged(urls:Array<String>) {
 		if (urls.exists(u -> u.endsWith("assets/greeting.txt")))
 			readGreeting(() -> say('hello: the greeting is now "$greeting"'));
 	}
 
-	/** sets `greeting` from assets/greeting.txt, once it's fetched **/
+	/** Sets `greeting` from assets/greeting.txt once it has been fetched. **/
 	static function readGreeting(?then:() -> Void) {
 		function set(text:String) {
 			text = text.trim();

@@ -2,8 +2,8 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			// the page `haxe dev.hxml` serves (start it first): breakpoints in src/*.hx, through
-			// the source maps, in the new code too after a reload
+			// Opens the page that `haxe dev.hxml` serves, so start that first. Breakpoints in
+			// src/*.hx work through the source maps, and keep working after a reload.
 			"name": "Hot (Chrome)",
 			"type": "chrome",
 			"request": "launch",

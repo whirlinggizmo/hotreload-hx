@@ -1,4 +1,5 @@
-# what every build of hello has: hotreload (haxelib dev hotreload-hx <this repo>, or haxelib git)
+# The settings every build of hello shares. hotreload-hx must be installed, with haxelib git
+# or with haxelib dev hotreload-hx <your clone>.
 -cp src
 -lib hotreload-hx
 --main Main

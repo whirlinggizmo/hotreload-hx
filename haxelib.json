@@ -4,9 +4,9 @@
 	"license": "MIT",
 	"tags": ["js", "hotreload", "gamedev"],
 	"description": "Hot reload for Haxe JavaScript programs, in the browser or node: save a .hx file and the running program switches to the new code without losing its state.",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"classPath": "src/",
-	"releasenote": "JS only: the browser and node, through its dev server. Native reload (hxcpp, through cppia) is on the hxcpp branch.",
+	"releasenote": "Every static keeps its value, and @:hot is deprecated. Static callbacks, enum constants, Map keys, Sets and workers now reload. A reload reports edits it cannot bring in, and survives failing hooks and bad builds. Defines and metadata are registered with Haxe. Reloader.update, watchAssets and dispose are removed. hxcpp/cppia support is frozen on the hxcpp branch.",
 	"contributors": [],
 	"dependencies": {}
 }

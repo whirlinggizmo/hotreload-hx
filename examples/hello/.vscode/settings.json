@@ -1,6 +1,6 @@
 {
-	// what the Haxe extension completes and checks with (and what "haxe: active
-	// configuration" builds): the page's build, with source maps
+	// The build the Haxe extension uses for completion and error checking, and the one
+	// "haxe: active configuration" runs: the page's build, with source maps.
 	"haxe.configurations": [
 		["build.hxml", "-debug"]
 	]

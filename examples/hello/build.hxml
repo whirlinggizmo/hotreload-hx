@@ -1,4 +1,4 @@
-# the page's build: web/hello.js, for web/index.html. `haxe dev.hxml` serves it hot; built
-# on its own, it's the release build, with no hot reload
+# Builds the page's script, web/hello.js, which web/index.html loads. `haxe dev.hxml` runs
+# this build with hot reload. Run on its own, it is the release build.
 common.hxml
 --js web/hello.js

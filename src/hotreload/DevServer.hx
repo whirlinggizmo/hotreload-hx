@@ -84,23 +84,25 @@ using StringTools;
 class DevServer {
 	static inline var HELP = "usage: haxe -lib hotreload-hx --run hotreload.DevServer [options] <build arguments>
 
-Builds the JS build (an hxml, say) hot, serves its output directory, and rebuilds it as its sources change; the page swaps the new
-code in as it runs.
+Builds a JS program with hot reload turned on, serves its output directory, and rebuilds it when
+a source file is saved. The running page or node program then switches to the new code.
 
-  --port <n>                  where it serves (8080)
-  --mount <url>=<dir>         a directory served at a path too: --mount /assets=assets
-  --watch <dir>               a directory whose sources are watched too, not the project's (a library being edited)
-  --reload-define <name[=v]>  a define for the reload builds only, not the first
-  --no-compilation-server     each build with a haxe of its own
-  --sidecar <command>         a command run beside it, started once it is serving and stopped with it (an HTTPS proxy, say):
-                              a JSON array of its arguments, or them in one string, split at spaces
-  --log <file>                its messages, and the builds', to a file
-  --stop-with-stdin           stops when its standard input closes
-  --help                      this
+  --port <n>                  The port to serve on. Defaults to 8080.
+  --mount <url>=<dir>         Serves another directory at a URL path, as in --mount /assets=assets.
+  --watch <dir>               Also rebuilds when files there change, for a library you are editing.
+  --reload-define <name[=v]>  A define used only for the rebuilds, not the first build.
+  --no-compilation-server     Runs a separate haxe for each rebuild instead of a compilation server.
+  --sidecar <command>         Runs a command alongside the server, such as an HTTPS proxy. It starts
+                              once the server is up and stops with it. Give it as a JSON array of
+                              arguments, or as one string split at spaces.
+  --log <file>                Writes the server's output, and the builds', to a file.
+  --stop-with-stdin           Stops the server when its standard input closes.
+  --help                      Shows this help.
 
-From an hxml: --macro hotreload.DevServer.serve(\"build.web.hxml\", {port: 8064, mounts: {\"/assets\": \"assets\"}})
-(options: port, mounts, watch, reloadDefines, compilationServer, sidecars, background, log, restart); stopped with
---macro hotreload.DevServer.stop(8064).";
+To start the server from an hxml instead:
+  --macro hotreload.DevServer.serve(\"build.hxml\", {port: 8064, mounts: {\"/assets\": \"assets\"}})
+serve takes port, mounts, watch, reloadDefines, compilationServer, sidecars, background, log and
+restart. To stop a server: --macro hotreload.DevServer.stop(8064)";
 
 	/**
 		The interval between source checks, in seconds.

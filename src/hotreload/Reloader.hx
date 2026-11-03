@@ -42,14 +42,6 @@ class Reloader {
 		#end
 	}
 
-	/** Does nothing. A reload happens as soon as the new bundle has loaded. **/
-	public inline function update() {}
-
-	/** Does nothing. The DevServer watches every file it serves (`--mount` serves more). **/
-	public inline function watchAssets(dir:String) {}
-
-	public inline function dispose() {}
-
 	#if (js && hotreload)
 	/** Whether this bundle is a reload's, not the one the page (or node) started with. **/
 	static var reloaded:Bool;
