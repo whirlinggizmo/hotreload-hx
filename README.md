@@ -379,8 +379,8 @@ between two frames:
 4. The old classes forward to the new ones. Any old code still in use, such as an old callback
    or an object nothing led to, ends up running the new code on the same data.
 
-The program keeps a request to the dev server open, and the dev server answers it when a new
-build is ready. A reload starts as soon as the build is done.
+The program keeps a request to the dev server open (a long poll), and the dev server answers it
+when a new build is ready. A reload starts as soon as the build is done.
 
 ## hxcpp and cppia
 
