@@ -24,7 +24,7 @@ cd examples/hello
 haxe dev.hxml
 ```
 
-Open http://localhost:8080/. The page prints a greeting a few times a second. Open
+Open http://localhost:8080/. The page prints a greeting about once a second. Open
 `src/Hello.hx`, change `name = "world"` to your own name, and save. The page says:
 
 ```
@@ -223,10 +223,10 @@ These come from a few limits:
   again after a reload, call it from an `@:afterHotReload` function.
 - **Closures keep their old body.** A lambda is a closure too, so it has the same limit.
   Because a reload can't tell whether an old closure is still around, it reports every closure
-  you edit. To keep an edit reloadable, pass a method instead (`onLoaded`), or keep the lambda to a
-  single call to a named function (`file -> loaded(file)`) and make the edits in that function.
-  The lambda is the one to use when the callback needs local variables, since it can pass them
-  along (`file -> loaded(file, ship)`).
+  you edit. To keep an edit reloadable, pass a method instead (`onLoaded`), or keep the lambda
+  to a single call to a named function (`file -> loaded(file)`) and make the edits in that
+  function. The lambda is the one to use when the callback needs local variables, since it can
+  pass them along (`file -> loaded(file, ship)`).
 - **Renamed fields aren't moved.** On existing objects, a renamed or removed field is
   `undefined`. A field you add without an initializer is `undefined` on them as well.
 - **Only reachable objects are updated.** An object that no static leads to keeps its old
@@ -267,8 +267,9 @@ haxe -lib hotreload-hx --run hotreload.DevServer [options] build.hxml
 | `--help`                       | Lists the options.                                                             |
 
 Only your project's own source directories are watched, not the libraries it uses (including
-a local `.haxelib/` repository). The startup output lists what is watched and what isn't. To
-work on a library and the program together, add its source directory with `--watch`.
+a local `.haxelib/` repository). The startup output lists the directories it watches, and any
+local libraries it leaves out. To work on a library and the program together, add its source
+directory with `--watch`.
 
 ### Starting it from an hxml
 
@@ -353,8 +354,8 @@ done.
 
 hotreload-hx used to reload native hxcpp builds as well, by loading the reloadable code as a
 cppia script. That version is frozen on the
-[`hxcpp`](https://github.com/whirlinggizmo/hotreload-hx/tree/hxcpp) branch. It still works,
-but it gets no fixes or new features. Everything added since the split exists only on `main`:
+[`hxcpp`](https://github.com/whirlinggizmo/hotreload-hx/tree/hxcpp) branch. It worked when it
+was frozen, but it gets no fixes or new features. Everything added since the split exists only on `main`:
 late-bound static callbacks, kept enum constants, the reload messages, failure recovery, Map
 and Set walking, and worker reloads.
 
@@ -376,8 +377,9 @@ the two the same was holding the JavaScript version back:
   host and the script means a crash or a full rebuild.
 
 To work around these limits, the two-target version needed extra rules that JavaScript didn't:
-statics had to be marked `@:hot`, callbacks had to go through generated forwarding functions,
-and the build warned about method references that native couldn't follow. Dropping cppia
+statics had to be marked `@:hot` to keep their values, a callback had to be a lambda that
+called a `@:hot` function, and the build warned about method references that native couldn't
+follow. Dropping cppia
 removed all of that.
 
 At best, cppia can reload method bodies and new code in classes the script owns, with stricter
