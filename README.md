@@ -86,9 +86,10 @@ hotreload: watch: including src/
 hotreload: ready
 ```
 
-The dev server builds the program with hot reload turned on, serves the output directory, and
-watches your source directories (`-cp`). When you save, it rebuilds in the background and the
-page picks up the new code between two frames. If the build fails, the errors appear in the
+The dev server is a small web server. It builds the program with hot reload turned on, serves
+the output directory at http://localhost:8080/, and watches your source directories (`-cp`).
+Open that address in a browser to run the page. When you save, it rebuilds in the background and
+the page picks up the new code between two frames. If the build fails, the errors appear in the
 terminal and the page keeps running the last good build.
 
 To make a release build, run `haxe build.hxml` as usual. Without the dev server, hot reload is
@@ -327,9 +328,11 @@ container, so the container's command should exit when its input closes. In Comp
 
 ## Node and web workers
 
-A node program (node 22.3 or later) works the same way. It asks the dev server for new builds
-at `HOTRELOAD_URL`, which defaults to `http://localhost:8080/__hotreload`. You can also set the
-URL at compile time with `-D hotreload-url=<url>`.
+A node program (node 22.3 or later) reloads too. Start the dev server as usual, then run the
+program with `node` yourself. Instead of being served a page, the program asks the dev server
+over HTTP for new builds. The program finds the server through the `HOTRELOAD_URL` environment
+variable, which defaults to `http://localhost:8080/__hotreload`. You can also set the URL at
+compile time with `-D hotreload-url=<url>`.
 
 A web worker started from the same bundle (`new Worker("main.js")`) reloads along with the
 page. A worker built from a separate hxml isn't rebuilt or reloaded.
@@ -376,8 +379,8 @@ between two frames:
 4. The old classes forward to the new ones. Any old code still in use, such as an old callback
    or an object nothing led to, ends up running the new code on the same data.
 
-The page waits on a long poll to the dev server, so a reload starts as soon as the build is
-done.
+The program keeps a request to the dev server open, and the dev server answers it when a new
+build is ready. A reload starts as soon as the build is done.
 
 ## hxcpp and cppia
 
