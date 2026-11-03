@@ -39,7 +39,7 @@ A few things happened there:
 
 - The new code is running, so the greeting uses the new name.
 - `ticks` kept counting. Static variables keep their values across a reload.
-- `name` took the new value because you edited the value it starts with. hotreload assumes that
+- `name` took the new value because you edited the value it starts with. The reload assumes that
   is what you meant, and says so in the console.
 - `sinceReload` is marked `@:resetOnHotReload`, so it started over.
 
@@ -117,7 +117,7 @@ After a reload, `score` and `enemies` are exactly what they were. There are thre
 - **You changed its type to something incompatible.** Changing `Int` to `Float` keeps the
   value. Changing `Int` to `String` resets it.
 
-hotreload prints a line for each reset, so nothing changes without you seeing it:
+Each reset prints a line in the console, so nothing changes without you seeing it:
 
 ```
 hotreload: static: game.Tuning.speed reset (initial value changed: 3.0 to 4.0)
@@ -198,7 +198,7 @@ reaches the new code after a reload.
 
 ## What a reload can't do
 
-Some edits can't take effect without a restart. hotreload notices them and says so in the
+Some edits can't take effect without a restart. A reload notices them and says so in the
 console, instead of leaving you to wonder why the change did nothing:
 
 ```
@@ -213,13 +213,17 @@ hotreload: enum: game.Mood.Angry moved (index 2 to 3, unreached values match ano
 
 These come from a few limits:
 
-- **Code that runs once doesn't run again.** That includes `main`, constructors of existing
-  objects and level setup. hotreload reports a change to `main` or a constructor. It can't tell
-  that a function only runs once, so it doesn't report other one-time code. If something needs
-  to run again, put it in an `@:afterHotReload` function.
+- **A reload doesn't call anything again.** It changes what the next call runs, but it doesn't
+  make that call. A function the program keeps calling, such as one called every frame, runs
+  the new code on its next call. Code that has already done its job, such as `main`, the
+  constructor of an object that already exists, or the setup of the current level, only picks
+  up an edit when the program calls it again. For `main`, that means a restart. To help you
+  find these, a reload reports edits to `main` and to constructors. It can't tell whether the
+  program will call any other function again, so it can't report the rest. To run something
+  again after a reload, call it from an `@:afterHotReload` function.
 - **Closures keep their old body.** A lambda is a closure too, so it has the same limit.
-  hotreload can't tell whether an old closure is still around, so it reports every closure you
-  edit. To keep an edit reloadable, pass a method instead (`onLoaded`), or keep the lambda to a
+  Because a reload can't tell whether an old closure is still around, it reports every closure
+  you edit. To keep an edit reloadable, pass a method instead (`onLoaded`), or keep the lambda to a
   single call to a named function (`file -> loaded(file)`) and make the edits in that function.
   The lambda is the one to use when the callback needs local variables, since it can pass them
   along (`file -> loaded(file, ship)`).
