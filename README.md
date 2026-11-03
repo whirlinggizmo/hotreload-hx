@@ -91,6 +91,8 @@ compiled out and `Reloader` does nothing.
 
 The build must output ES6 or later (`-D js-es=6`). The library sets that for you.
 
+The library's defines and metadata are listed in [Defines and metadata](#defines-and-metadata).
+
 ## What survives a reload
 
 ### Static variables keep their values
@@ -322,7 +324,7 @@ container, so the container's command should exit when its input closes. In Comp
 
 A node program (node 22.3 or later) works the same way. It asks the dev server for new builds
 at `HOTRELOAD_URL`, which defaults to `http://localhost:8080/__hotreload`. You can also set the
-URL at compile time with `-D hotreload_url=<url>`.
+URL at compile time with `-D hotreload-url=<url>`.
 
 A web worker started from the same bundle (`new Worker("main.js")`) reloads along with the
 page. A worker built from a separate hxml isn't rebuilt or reloaded.
@@ -334,6 +336,28 @@ browser's DevTools or VS Code. Each reload has its own source map, so breakpoint
 in the new code. The hello example includes a VS Code launch configuration for Chrome.
 
 Reloaded code runs at full speed. Nothing is interpreted.
+
+## Defines and metadata
+
+| Define                   | What it does                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `-D hotreload`           | Builds the program hot. The dev server adds it, so you rarely set it.        |
+| `-D hotreload-port=<n>`  | The port `serve` and `stop` use when none is given. Defaults to 8080.        |
+| `-D hotreload-url=<url>` | Where the program asks for new builds. See [Node and web workers](#node-and-web-workers). |
+
+| Metadata             | Goes on                         | What it does                                       |
+| -------------------- | ------------------------------- | -------------------------------------------------- |
+| `@:resetOnHotReload` | a static var                    | Resets it to its initial value on every reload.    |
+| `@:beforeHotReload`  | a static function, no arguments | Runs just before each reload, on the old code.     |
+| `@:afterHotReload`   | a static function, no arguments | Runs just after each reload, on the new code.      |
+| `@:hot`              | a static                        | Deprecated. Does nothing, and the build warns.     |
+
+Haxe lists them, with their descriptions:
+
+```bash
+haxe -lib hotreload-hx --help-user-defines
+haxe -lib hotreload-hx --help-user-metas
+```
 
 ## How it works
 

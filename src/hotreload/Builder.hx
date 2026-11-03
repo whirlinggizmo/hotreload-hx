@@ -58,6 +58,7 @@ class Builder {
 		if (Context.defined("hotreload_initialized"))
 			return;
 		Compiler.define("hotreload_initialized");
+		registerDocs();
 		// A compilation server keeps a macro's statics from one build to the next.
 		mode = Off;
 		mainClass = null;
@@ -79,6 +80,57 @@ class Builder {
 		invalidate();
 		initJs();
 		Compiler.addGlobalMetadata("", "@:build(hotreload.Builder.build())", true, true, false);
+	}
+
+	/**
+		Registers the library's defines and metadata with the compiler.
+
+		The registration is for documentation only. `haxe --help-user-defines` and
+		`--help-user-metas` list them, and an editor shows their docs. The defines the dev server
+		passes to its own builds are not registered.
+	**/
+	static function registerDocs() {
+		var source = "hotreload-hx";
+		Compiler.registerCustomDefine({
+			define: "hotreload",
+			doc: "Builds the program hot, so that it reloads as its sources change. The dev server adds it.",
+			platforms: [Js]
+		}, source);
+		Compiler.registerCustomDefine({
+			define: "hotreload-port",
+			doc: "The port that DevServer.serve and DevServer.stop use when none is given. Defaults to 8080.",
+			params: ["port"]
+		}, source);
+		Compiler.registerCustomDefine({
+			define: "hotreload-url",
+			doc: "The URL where a hot build requests new builds. Defaults to HOTRELOAD_URL in node, and to the page's own server in a browser.",
+			params: ["url"],
+			platforms: [Js]
+		}, source);
+		Compiler.registerCustomMetadata({
+			metadata: ":resetOnHotReload",
+			doc: "Resets a static var to its initial value on every reload.",
+			targets: [ClassField],
+			platforms: [Js]
+		}, source);
+		Compiler.registerCustomMetadata({
+			metadata: ":beforeHotReload",
+			doc: "Runs a static function with no parameters just before each reload, on the old code.",
+			targets: [ClassField],
+			platforms: [Js]
+		}, source);
+		Compiler.registerCustomMetadata({
+			metadata: ":afterHotReload",
+			doc: "Runs a static function with no parameters just after each reload, on the new code.",
+			targets: [ClassField],
+			platforms: [Js]
+		}, source);
+		Compiler.registerCustomMetadata({
+			metadata: ":hot",
+			doc: "Deprecated. Has no effect, since every static keeps its value across a reload.",
+			targets: [ClassField],
+			platforms: [Js]
+		}, source);
 	}
 
 	static function invalidate() {
