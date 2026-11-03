@@ -213,12 +213,16 @@ hotreload: enum: game.Mood.Angry moved (index 2 to 3, unreached values match ano
 
 These come from a few limits:
 
-- **Code that already ran doesn't run again.** That includes `main`, constructors of existing
+- **Code that runs once doesn't run again.** That includes `main`, constructors of existing
   objects and level setup. hotreload reports a change to `main` or a constructor. It can't tell
   that a function only runs once, so it doesn't report other one-time code. If something needs
   to run again, put it in an `@:afterHotReload` function.
-- **Closures keep their old body,** as described above. hotreload can't tell whether an old
-  closure is still around, so it reports every closure you edit.
+- **Closures keep their old body.** A lambda is a closure too, so it has the same limit.
+  hotreload can't tell whether an old closure is still around, so it reports every closure you
+  edit. To keep an edit reloadable, pass a method instead (`onLoaded`), or keep the lambda to a
+  single call to a named function (`file -> loaded(file)`) and make the edits in that function.
+  The lambda is the one to use when the callback needs local variables, since it can pass them
+  along (`file -> loaded(file, ship)`).
 - **Renamed fields aren't moved.** On existing objects, a renamed or removed field is
   `undefined`. So is a new field that has no initializer.
 - **Only reachable objects are updated.** An object that no static leads to keeps its old
