@@ -15,8 +15,14 @@ using haxe.macro.Tools;
 /** One static function passed as a value: the class and name it belongs to, and where it was passed. **/
 typedef StaticUse = {target:String, cls:String, name:String, file:String, min:Int, max:Int};
 
-/** A source file's finds (Builder.findStaticValues), with the stamp of the file they were found in. **/
-typedef FileUses = {mtime:Float, size:Int, uses:Array<StaticUse>};
+/** A file's size and modification time, which tell whether it changed since a build. **/
+typedef Stamp = {file:String, mtime:Float, size:Int};
+
+/**
+	A source file's finds (Builder.findStaticValues), with the stamps of the file and of the files
+	its typed code depends on.
+**/
+typedef FileUses = {mtime:Float, size:Int, uses:Array<StaticUse>, deps:Array<Stamp>};
 
 private enum Mode {
 	Off;
@@ -318,6 +324,9 @@ class Builder {
 	/** The finds of the file being walked. **/
 	static var currentUses:Array<StaticUse>;
 
+	/** The files of the classes that the file being walked refers to statically. **/
+	static var currentDeps:Map<String, Bool>;
+
 	/**
 		Finds the static functions the code passes as values, anywhere but in the standard
 		library and this one.
@@ -325,11 +334,13 @@ class Builder {
 		lateStatics makes them late-bound. A method of an object passed as a value is Haxe's
 		`$bind`, which lateBind makes late-bound.
 
-		A file's finds depend on its text alone, so they are kept between builds (usesCache,
-		beside the output), each with the file's size and modification time, and a file is
-		walked again only when its stamp changed, when the reload's changed-files list names it,
-		or when it is new. Everything else comes from the cache. The compilation server re-types
-		only the changed modules; this keeps the walk, which is interpreted, to the same.
+		The walk is interpreted and grows with the program, so its finds are kept between builds
+		(usesCache, beside the output). A file's finds depend on its own text and on the classes
+		its code refers to statically. Whether `Other.cb` counts depends on whether Other declares
+		it as a function. Each file's entry therefore records the stamps of the file and of the
+		files of those classes. A file is walked again when any of them changed, or when the
+		reload's changed-files list names any of them. A file added to the program can change
+		how names elsewhere resolve, so it makes every file walk again.
 	**/
 	static function findStaticValues(types:Array<ModuleType>) {
 		staticValues = [];
@@ -365,19 +376,33 @@ class Builder {
 					list.push(c);
 				default:
 			}
+		var stamps = new Map<String, Stamp>();
+		function stamp(file:String):Stamp {
+			var s = stamps.get(file);
+			if (s == null) {
+				var stat = try FileSystem.stat(file) catch (_) null;
+				stamps.set(file, s = {file: file, mtime: stat == null ? -1. : stat.mtime.getTime(), size: stat == null ? -1 : stat.size});
+			}
+			return s;
+		}
+		function unchanged(s:Stamp):Bool {
+			var now = stamp(s.file);
+			return now.size >= 0 && !changed.exists(s.file) && now.mtime == s.mtime && now.size == s.size;
+		}
+		var added = files.exists(f -> !cache.exists(f));
 		var fresh = new haxe.DynamicAccess<FileUses>();
 		var dirty = false;
 		var walked = 0;
 		for (file in files) {
-			var stat = try FileSystem.stat(file) catch (_) null;
-			var mtime = stat == null ? -1. : stat.mtime.getTime();
-			var size = stat == null ? -1 : stat.size;
-			var cached = cache.get(file);
+			var own = stamp(file);
+			var cached = added ? null : cache.get(file);
 			var entry:FileUses;
-			if (cached != null && stat != null && !changed.exists(file) && cached.mtime == mtime && cached.size == size) {
+			if (cached != null && cached.deps != null && unchanged({file: file, mtime: cached.mtime, size: cached.size})
+				&& cached.deps.foreach(unchanged)) {
 				entry = cached;
 			} else {
 				currentUses = [];
+				currentDeps = [];
 				for (c in byFile.get(file)) {
 					var fields = c.statics.get().concat(c.fields.get());
 					if (c.constructor != null)
@@ -388,8 +413,10 @@ class Builder {
 							valuesIn(e, false);
 					}
 				}
-				entry = {mtime: mtime, size: size, uses: currentUses};
+				currentDeps.remove(file);
+				entry = {mtime: own.mtime, size: own.size, uses: currentUses, deps: [for (d in currentDeps.keys()) stamp(d)]};
 				currentUses = null;
+				currentDeps = null;
 				walked++;
 				dirty = true;
 			}
@@ -418,6 +445,11 @@ class Builder {
 	}
 
 	static function valuesIn(e:TypedExpr, called:Bool) {
+		switch (e.expr) {
+			case TField(_, FStatic(_.get() => c, _)) if (!isLibraryOwn(c)):
+				currentDeps.set(fileOf(c.pos), true);
+			default:
+		}
 		switch (e.expr) {
 			case TCall(callee, args):
 				valuesIn(callee, true);
