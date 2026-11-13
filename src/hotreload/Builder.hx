@@ -12,6 +12,12 @@ using Lambda;
 using StringTools;
 using haxe.macro.Tools;
 
+/** One static function passed as a value: the class and name it belongs to, and where it was passed. **/
+typedef StaticUse = {target:String, cls:String, name:String, file:String, min:Int, max:Int};
+
+/** A source file's finds (Builder.findStaticValues), with the stamp of the file they were found in. **/
+typedef FileUses = {mtime:Float, size:Int, uses:Array<StaticUse>};
+
 private enum Mode {
 	Off;
 	Js;       // A hot build (-D hotreload), which hotreload.DevServer serves and rebuilds.
@@ -168,6 +174,7 @@ class Builder {
 		findProject(args, cwd);
 		var path = Context.defined("hotreload_config") ? Context.definedValue("hotreload_config") : absolute(cwd, js) + ".hotreload.json";
 		var output = absolute(cwd, js);
+		usesCache = Path.join([Path.directory(output), ".hotreload-statics.json"]);
 		Context.onAfterGenerate(() -> {
 			lateBind(output);
 			lateStatics(output);
@@ -305,18 +312,73 @@ class Builder {
 	**/
 	static var staticValues:Map<String, {cls:String, names:Map<String, Position>}>;
 
+	/** The file the finds are kept in between builds, beside the output. **/
+	static var usesCache:String;
+
+	/** The finds of the file being walked. **/
+	static var currentUses:Array<StaticUse>;
+
 	/**
 		Finds the static functions the code passes as values, anywhere but in the standard
 		library and this one.
 
 		lateStatics makes them late-bound. A method of an object passed as a value is Haxe's
 		`$bind`, which lateBind makes late-bound.
+
+		A file's finds depend on its text alone, so they are kept between builds (usesCache,
+		beside the output), each with the file's size and modification time, and a file is
+		walked again only when its stamp changed, when the reload's changed-files list names it,
+		or when it is new. Everything else comes from the cache. The compilation server re-types
+		only the changed modules; this keeps the walk, which is interpreted, to the same.
 	**/
 	static function findStaticValues(types:Array<ModuleType>) {
 		staticValues = [];
+		var cache:Map<String, FileUses> = [];
+		if (usesCache != null && FileSystem.exists(usesCache)) {
+			try {
+				var data:haxe.DynamicAccess<FileUses> = haxe.Json.parse(sys.io.File.getContent(usesCache));
+				for (file => entry in data)
+					cache.set(file, entry);
+			} catch (_) {}
+		}
+		var changed = new Map<String, Bool>();
+		if (Context.defined("hotreload_invalidate")) {
+			var list = try sys.io.File.getContent(Context.definedValue("hotreload_invalidate")) catch (_) "";
+			for (f in list.split("\n"))
+				if (f != "")
+					changed.set(Path.normalize(FileSystem.absolutePath(f)), true);
+		}
+		// The classes of each file, in the order the types come.
+		var byFile = new Map<String, Array<ClassType>>();
+		var files = [];
 		for (t in types)
 			switch (t) {
 				case TClassDecl(_.get() => c) if (!c.isExtern && !isLibraryOwn(c)):
+					var file = fileOf(c.pos);
+					if (file == null)
+						continue;
+					var list = byFile.get(file);
+					if (list == null) {
+						byFile.set(file, list = []);
+						files.push(file);
+					}
+					list.push(c);
+				default:
+			}
+		var fresh = new haxe.DynamicAccess<FileUses>();
+		var dirty = false;
+		var walked = 0;
+		for (file in files) {
+			var stat = try FileSystem.stat(file) catch (_) null;
+			var mtime = stat == null ? -1. : stat.mtime.getTime();
+			var size = stat == null ? -1 : stat.size;
+			var cached = cache.get(file);
+			var entry:FileUses;
+			if (cached != null && stat != null && !changed.exists(file) && cached.mtime == mtime && cached.size == size) {
+				entry = cached;
+			} else {
+				currentUses = [];
+				for (c in byFile.get(file)) {
 					var fields = c.statics.get().concat(c.fields.get());
 					if (c.constructor != null)
 						fields.push(c.constructor.get());
@@ -325,8 +387,34 @@ class Builder {
 						if (e != null)
 							valuesIn(e, false);
 					}
-				default:
+				}
+				entry = {mtime: mtime, size: size, uses: currentUses};
+				currentUses = null;
+				walked++;
+				dirty = true;
 			}
+			fresh.set(file, entry);
+			for (u in entry.uses) {
+				var found = staticValues.get(u.target);
+				if (found == null)
+					staticValues.set(u.target, found = {cls: u.cls, names: []});
+				if (!found.names.exists(u.name))
+					found.names.set(u.name, Context.makePosition({file: u.file, min: u.min, max: u.max}));
+			}
+		}
+		if (!dirty)
+			for (file in cache.keys())
+				if (!fresh.exists(file))
+					dirty = true;
+		if (dirty && usesCache != null)
+			try {
+				// (The output's directory may not exist yet on the first build.)
+				if (!FileSystem.exists(Path.directory(usesCache)))
+					FileSystem.createDirectory(Path.directory(usesCache));
+				sys.io.File.saveContent(usesCache, haxe.Json.stringify(fresh));
+			} catch (_) {}
+		if (Context.defined("hotreload_times"))
+			Sys.println('hotreload: static values: ${files.length} files, $walked walked');
 	}
 
 	static function valuesIn(e:TypedExpr, called:Bool) {
@@ -338,12 +426,8 @@ class Builder {
 			case TParenthesis(x) | TMeta(_, x):
 				valuesIn(x, called);
 			case TField(sub, FStatic(_.get() => c, _.get() => cf)) if (!called && cf.kind.match(FMethod(MethNormal)) && !c.isExtern && !isLibraryOwn(c)):
-				var name = jsName(c);
-				var entry = staticValues.get(name);
-				if (entry == null)
-					staticValues.set(name, entry = {cls: fullName(c.pack, c.name), names: []});
-				if (!entry.names.exists(cf.name))
-					entry.names.set(cf.name, e.pos);
+				var p = Context.getPosInfos(e.pos);
+				currentUses.push({target: jsName(c), cls: fullName(c.pack, c.name), name: cf.name, file: p.file, min: p.min, max: p.max});
 				valuesIn(sub, false);
 			default:
 				e.iter(x -> valuesIn(x, false));
